@@ -255,8 +255,14 @@ func RegisterBuiltins(r *Registry) {
     // Cluster 断言
     r.Register("ClusterReady", ClusterReady)
     r.Register("ClusterHealthy", ClusterHealthy)
+    r.Register("ClusterPending", ClusterPending)
+    r.Register("ClusterStopped", ClusterStopped)
+    r.Register("ClusterDeleted", ClusterDeleted)
+    r.Register("ClusterCeased", ClusterCeased)
+    r.Register("ClusterPhaseEquals", ClusterPhaseEquals)
     r.Register("ClusterNodeCount", ClusterNodeCount)
     r.Register("ClusterSecurityGroupExists", ClusterSecurityGroupExists)
+    r.Register("ClusterSecurityGroupNotExists", ClusterSecurityGroupNotExists)
 
     // Instance 断言
     r.Register("InstanceReady", InstanceReady)
@@ -274,7 +280,17 @@ func RegisterBuiltins(r *Registry) {
     r.Register("ResourceNotExists", ResourceNotExists)
     r.Register("DeploymentAvailable", DeploymentAvailable)
 
-    // ===== 提取函数（用于 EnvInjection，通过 Result.Actual 返回值）=====
+    // Kubernetes 资源就绪检查
+    r.Register("DeploymentReady", DeploymentReady)
+    r.Register("StatefulSetReady", StatefulSetReady)
+    r.Register("DaemonSetReady", DaemonSetReady)
+    r.Register("PodReady", PodReady)
+    r.Register("PodComplete", PodComplete)
+    r.Register("JobComplete", JobComplete)
+    r.Register("ServiceReady", ServiceReady)
+    r.Register("PVCBound", PVCBound)
+
+    // ===== 提取函数（用于 EnvInjection）=====
     r.Register("ClusterNodeURL", ClusterNodeURL)
     r.Register("ClusterNodeIP", ClusterNodeIP)
     r.Register("ClusterID", ClusterID)
@@ -286,19 +302,66 @@ func RegisterBuiltins(r *Registry) {
 
 ### 函数列表
 
+#### 通用断言
+
 | 函数名 | 说明 | 参数 |
 |--------|------|------|
 | `ResourceExists` | 资源存在 | 无 |
 | `ResourceNotExists` | 资源不存在 | 无 |
 | `DeploymentAvailable` | Deployment 可用副本数满足 | 无 |
+
+#### Kubernetes 资源就绪检查
+
+| 函数名 | 说明 | 参数 |
+|--------|------|------|
+| `DeploymentReady` | Deployment 就绪（available >= replicas 且 updated >= replicas） | 无 |
+| `StatefulSetReady` | StatefulSet 就绪（ready >= replicas 且版本一致） | 无 |
+| `DaemonSetReady` | DaemonSet 就绪（ready >= desired） | 无 |
+| `PodReady` | Pod 就绪（Running 且所有容器 Ready） | 无 |
+| `PodComplete` | Pod 已完成（phase=Succeeded） | 无 |
+| `JobComplete` | Job 已完成（succeeded >= completions） | 无 |
+| `ServiceReady` | Service 已就绪（有 ClusterIP 或 ExternalName） | 无 |
+| `PVCBound` | PVC 已绑定（phase=Bound） | 无 |
+
+#### Cluster 断言
+
+| 函数名 | 说明 | 参数 |
+|--------|------|------|
 | `ClusterReady` | 集群就绪（phase=active, 无 transition） | 无 |
 | `ClusterHealthy` | 集群健康（phase=active, health=healthy） | 无 |
+| `ClusterPending` | 集群 pending 状态 | 无 |
+| `ClusterStopped` | 集群已停止（phase=stopped） | 无 |
+| `ClusterDeleted` | 集群已删除（phase=deleted） | 无 |
+| `ClusterCeased` | 集群已销毁（phase=ceased） | 无 |
+| `ClusterPhaseEquals` | 通用 phase 检查 | `phase: string`, `ignoreTransition: bool` |
 | `ClusterNodeCount` | 集群节点数量 | `expected: int` |
-| `ClusterSecurityGroupExists` | 集群安全组存在 | `id: string`, `expected: bool` |
+| `ClusterSecurityGroupExists` | 集群安全组存在 | `id: string`（可选）, `expected: bool` |
+| `ClusterSecurityGroupNotExists` | 集群安全组不存在 | `id: string`（可选） |
+
+#### Instance 断言
+
+| 函数名 | 说明 | 参数 |
+|--------|------|------|
 | `InstanceReady` | 实例就绪（phase=running） | 无 |
 | `InstanceStopped` | 实例已停止（phase=stopped） | 无 |
-| `InstancePhaseEquals` | 实例 phase 等于指定值 | `phase: string`, `ignoreTransition: bool` |
-| `FieldPath` | 通用字段路径提取 | `path: string` |
+| `InstancePending` | 实例 pending 状态 | 无 |
+| `InstanceSuspended` | 实例已暂停（phase=suspended） | 无 |
+| `InstanceTerminated` | 实例已终止（phase=terminated） | 无 |
+| `InstanceCeased` | 实例已销毁（phase=ceased） | 无 |
+| `InstancePhaseEquals` | 通用 phase 检查 | `phase: string`, `ignoreTransition: bool` |
+| `InstanceSecurityGroupExists` | 实例安全组存在 | `id: string`（可选）, `expected: bool` |
+| `InstanceSecurityGroupNotExists` | 实例安全组不存在 | `id: string`（可选） |
+
+#### 提取函数（用于 EnvInjection）
+
+| 函数名 | 说明 | 参数 |
+|--------|------|------|
+| `FieldPath` | 通用字段路径提取 | `path: string`（如 "status.phase"） |
+| `ClusterNodeURL` | 获取指定角色节点 IP | `role: string`, `index: int`（默认 0） |
+| `ClusterNodeIP` | 获取节点私有 IP | `role: string`（可选）, `index: int` |
+| `ClusterID` | 获取集群 ID | 无 |
+| `ClusterVIP` | 获取指定名称的 VIP | `name: string` |
+| `ClusterClientPort` | 获取客户端端口 | 无 |
 
 ### 示例实现
 

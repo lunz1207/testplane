@@ -191,11 +191,64 @@ kubectl get loadtest app-load-test -o jsonpath='{.status.injectedValues}'
 
 ### 通用函数
 
-| 期望函数 | 说明 |
-|---------|------|
-| `ResourceExists` | 检查资源是否存在 |
-| `ResourceNotExists` | 检查资源是否不存在 |
-| `FieldPath` | 通用字段路径提取器，参数：`path: string`（如 "status.phase"） |
+| 期望函数 | 说明 | 参数 |
+|---------|------|------|
+| `ResourceExists` | 检查资源是否存在 | 无 |
+| `ResourceNotExists` | 检查资源是否不存在 | 无 |
+| `DeploymentAvailable` | 检查 Deployment 是否有可用副本 | 无 |
+
+### Kubernetes 资源就绪检查
+
+| 期望函数 | 说明 | 参数 |
+|---------|------|------|
+| `DeploymentReady` | Deployment 就绪（available >= replicas 且 updated >= replicas） | 无 |
+| `StatefulSetReady` | StatefulSet 就绪（ready >= replicas 且版本一致） | 无 |
+| `DaemonSetReady` | DaemonSet 就绪（ready >= desired） | 无 |
+| `PodReady` | Pod 就绪（Running 且所有容器 Ready） | 无 |
+| `PodComplete` | Pod 已完成（phase=Succeeded） | 无 |
+| `JobComplete` | Job 已完成（succeeded >= completions） | 无 |
+| `ServiceReady` | Service 已就绪（有 ClusterIP 或 ExternalName） | 无 |
+| `PVCBound` | PVC 已绑定（phase=Bound） | 无 |
+
+### Cluster 断言函数
+
+| 期望函数 | 说明 | 参数 |
+|---------|------|------|
+| `ClusterReady` | 集群就绪（phase=active 且无 transitionStatus） | 无 |
+| `ClusterHealthy` | 集群健康（phase=active、health=healthy） | 无 |
+| `ClusterPending` | 集群 pending 状态 | 无 |
+| `ClusterStopped` | 集群已停止 | 无 |
+| `ClusterDeleted` | 集群已删除 | 无 |
+| `ClusterCeased` | 集群已销毁 | 无 |
+| `ClusterPhaseEquals` | 通用 phase 检查 | `phase: string`, `ignoreTransition: bool` |
+| `ClusterNodeCount` | 检查集群节点数量 | `expected: int` |
+| `ClusterSecurityGroupExists` | 检查集群安全组存在 | `id: string`（可选） |
+| `ClusterSecurityGroupNotExists` | 检查集群安全组不存在 | `id: string`（可选） |
+
+### Instance 断言函数
+
+| 期望函数 | 说明 | 参数 |
+|---------|------|------|
+| `InstanceReady` | 实例就绪（phase=running） | 无 |
+| `InstanceStopped` | 实例已停止 | 无 |
+| `InstancePending` | 实例 pending 状态 | 无 |
+| `InstanceSuspended` | 实例已暂停 | 无 |
+| `InstanceTerminated` | 实例已终止 | 无 |
+| `InstanceCeased` | 实例已销毁 | 无 |
+| `InstancePhaseEquals` | 通用 phase 检查 | `phase: string`, `ignoreTransition: bool` |
+| `InstanceSecurityGroupExists` | 检查实例安全组存在 | `id: string`（可选） |
+| `InstanceSecurityGroupNotExists` | 检查实例安全组不存在 | `id: string`（可选） |
+
+### 提取函数（用于 LoadTest EnvInjection）
+
+| 提取函数 | 说明 | 参数 |
+|---------|------|------|
+| `FieldPath` | 通用字段路径提取器 | `path: string`（如 "status.phase"） |
+| `ClusterNodeURL` | 获取指定角色节点的 IP | `role: string`, `index: int`（默认 0） |
+| `ClusterNodeIP` | 获取节点私有 IP | `role: string`（可选）, `index: int` |
+| `ClusterID` | 获取集群 ID | 无 |
+| `ClusterVIP` | 获取指定名称的 VIP | `name: string` |
+| `ClusterClientPort` | 获取客户端端口 | 无 |
 
 ## 执行模式
 
