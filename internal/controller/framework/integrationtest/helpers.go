@@ -103,15 +103,15 @@ const (
 )
 
 // detectAndIgnoreSpecChange 检测运行中的 IntegrationTest spec 变更并忽略。
-// 返回 true 表示检测到 spec 变更（已被忽略）。
-func (r *IntegrationTestReconciler) detectAndIgnoreSpecChange(_ context.Context, it *infrav1alpha1.IntegrationTest, status *infrav1alpha1.IntegrationTestStatus) bool {
+// 返回 true 表示检测到 spec 变更（已被忽略），调用方需要 patch 状态。
+func (r *IntegrationTestReconciler) detectAndIgnoreSpecChange(_ context.Context, it *infrav1alpha1.IntegrationTest) bool {
 	// 只有在已开始执行后（ObservedGeneration > 0）才检测变更
-	if status.ObservedGeneration == 0 {
+	if it.Status.ObservedGeneration == 0 {
 		return false
 	}
 
 	// 检查 Generation 是否变化
-	if it.Generation == status.ObservedGeneration {
+	if it.Generation == it.Status.ObservedGeneration {
 		return false
 	}
 
@@ -127,15 +127,15 @@ func (r *IntegrationTestReconciler) detectAndIgnoreSpecChange(_ context.Context,
 
 	// 更新或添加 Condition
 	found := false
-	for i := range status.Conditions {
-		if status.Conditions[i].Type == ConditionTypeSpecChangedIgnored {
-			status.Conditions[i] = condition
+	for i := range it.Status.Conditions {
+		if it.Status.Conditions[i].Type == ConditionTypeSpecChangedIgnored {
+			it.Status.Conditions[i] = condition
 			found = true
 			break
 		}
 	}
 	if !found {
-		status.Conditions = append(status.Conditions, condition)
+		it.Status.Conditions = append(it.Status.Conditions, condition)
 	}
 
 	return true

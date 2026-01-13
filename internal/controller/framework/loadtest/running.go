@@ -32,7 +32,8 @@ import (
 )
 
 // transitionToRunning 进入 Running 阶段并应用 workload。
-func (r *LoadTestReconciler) transitionToRunning(ctx context.Context, lt *infrav1alpha1.LoadTest) (ctrl.Result, error) {
+// emitTargetReadyEvent 参数表示是否在 patch 后发送 TargetReady 事件（readyCondition 通过时使用）。
+func (r *LoadTestReconciler) transitionToRunning(ctx context.Context, lt *infrav1alpha1.LoadTest, emitTargetReadyEvent ...bool) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	// 解析环境变量注入
@@ -61,6 +62,10 @@ func (r *LoadTestReconciler) transitionToRunning(ctx context.Context, lt *infrav
 		return ctrl.Result{}, err
 	}
 
+	// patch 成功后发送 Event
+	if len(emitTargetReadyEvent) > 0 && emitTargetReadyEvent[0] {
+		framework.EmitNormalEvent(r.Recorder, lt, EventReasonTargetReady, "Target is ready")
+	}
 	framework.EmitNormalEvent(r.Recorder, lt, EventReasonLoadTestRunning, "LoadTest is now running")
 
 	return ctrl.Result{RequeueAfter: defaultRequeue}, nil
@@ -138,6 +143,7 @@ func (r *LoadTestReconciler) shouldWaitForNextCheck(status *infrav1alpha1.Expect
 }
 
 // executeAndRecordExpectations 执行期望检查并记录结果。
+// 采用分散 patch 模式：先 patch 状态，成功后再发送 Event。
 func (r *LoadTestReconciler) executeAndRecordExpectations(
 	ctx context.Context,
 	lt *infrav1alpha1.LoadTest,
@@ -156,52 +162,66 @@ func (r *LoadTestReconciler) executeAndRecordExpectations(
 	status.CheckCount++
 	status.LastResults = framework.ToExpectationResultSummaries(results)
 
-	// 处理检查结果
+	// 处理检查结果（只更新状态，不发送 Event）
+	var eventMsg string
+	var eventType string
 	if allPassed {
-		r.handleExpectationPass(lt, status)
+		eventMsg = r.handleExpectationPass(lt, status)
+		eventType = "pass"
 	} else {
-		if shouldFail := r.handleExpectationFail(ctx, lt, status); shouldFail {
+		var shouldFail bool
+		eventMsg, shouldFail = r.handleExpectationFail(ctx, lt, status)
+		eventType = "fail"
+		if shouldFail {
 			return ctrl.Result{}, nil
 		}
 	}
 
+	// 先 patch 状态
 	if err := framework.PatchStatusMerge(ctx, r.Client, lt); err != nil {
 		return ctrl.Result{}, err
+	}
+
+	// patch 成功后再发送 Event
+	if eventType == "pass" {
+		framework.EmitNormalEvent(r.Recorder, lt, framework.EventReasonExpectationPassed, eventMsg)
+	} else {
+		framework.EmitWarningEvent(r.Recorder, lt, framework.EventReasonExpectationFailed, eventMsg)
 	}
 
 	return ctrl.Result{RequeueAfter: interval}, nil
 }
 
 // handleExpectationPass 处理期望检查通过的情况。
-func (r *LoadTestReconciler) handleExpectationPass(lt *infrav1alpha1.LoadTest, status *infrav1alpha1.ExpectationsStatus) {
+// 只更新状态，返回 Event 消息（调用方负责 patch 后发送 Event）。
+func (r *LoadTestReconciler) handleExpectationPass(lt *infrav1alpha1.LoadTest, status *infrav1alpha1.ExpectationsStatus) string {
 	log := logf.FromContext(context.Background())
 
 	status.PassCount++
 	status.ConsecutiveFailures = 0
 	log.Info("expectations check passed", "checkCount", status.CheckCount)
 
-	// 设置 ExpectationsMet Condition
-	setCondition(&lt.Status, ConditionTypeExpectationsMet, metav1.ConditionTrue, "ExpectationsPassed",
-		fmt.Sprintf("Expectations check passed (pass: %d, fail: %d)", status.PassCount, status.FailCount), lt.Generation)
+	msg := fmt.Sprintf("Expectations check passed (pass: %d, fail: %d)", status.PassCount, status.FailCount)
 
-	framework.EmitNormalEvent(r.Recorder, lt, framework.EventReasonExpectationPassed,
-		fmt.Sprintf("Expectations check passed (pass: %d, fail: %d)", status.PassCount, status.FailCount))
+	// 设置 ExpectationsMet Condition
+	setCondition(&lt.Status, ConditionTypeExpectationsMet, metav1.ConditionTrue, "ExpectationsPassed", msg, lt.Generation)
+
+	return msg
 }
 
-// handleExpectationFail 处理期望检查失败的情况。返回 true 表示应该终止测试。
-func (r *LoadTestReconciler) handleExpectationFail(ctx context.Context, lt *infrav1alpha1.LoadTest, status *infrav1alpha1.ExpectationsStatus) bool {
+// handleExpectationFail 处理期望检查失败的情况。
+// 只更新状态，返回 Event 消息和是否应该终止测试（调用方负责 patch 后发送 Event）。
+func (r *LoadTestReconciler) handleExpectationFail(ctx context.Context, lt *infrav1alpha1.LoadTest, status *infrav1alpha1.ExpectationsStatus) (string, bool) {
 	log := logf.FromContext(ctx)
 
 	status.FailCount++
 	status.ConsecutiveFailures++
 	log.Info("expectations check failed", "consecutiveFailures", status.ConsecutiveFailures)
 
-	// 设置 ExpectationsMet Condition
-	setCondition(&lt.Status, ConditionTypeExpectationsMet, metav1.ConditionFalse, "ExpectationsFailed",
-		fmt.Sprintf("Expectations check failed (consecutive failures: %d)", status.ConsecutiveFailures), lt.Generation)
+	msg := fmt.Sprintf("Expectations check failed (consecutive failures: %d)", status.ConsecutiveFailures)
 
-	framework.EmitWarningEvent(r.Recorder, lt, framework.EventReasonExpectationFailed,
-		fmt.Sprintf("Expectations check failed (consecutive failures: %d)", status.ConsecutiveFailures))
+	// 设置 ExpectationsMet Condition
+	setCondition(&lt.Status, ConditionTypeExpectationsMet, metav1.ConditionFalse, "ExpectationsFailed", msg, lt.Generation)
 
 	// 检查是否达到失败阈值
 	threshold := getOrDefaultInt32(lt.Spec.Expectations.FailureThreshold, 3)
@@ -209,10 +229,10 @@ func (r *LoadTestReconciler) handleExpectationFail(ctx context.Context, lt *infr
 	if status.ConsecutiveFailures >= threshold {
 		_, _ = r.setFailed(ctx, lt, "ExpectationsFailed",
 			fmt.Sprintf("consecutive failures reached threshold: %d", threshold))
-		return true
+		return msg, true
 	}
 
-	return false
+	return msg, false
 }
 
 // buildStateForExpectations 为 expectations 构建 state map。
