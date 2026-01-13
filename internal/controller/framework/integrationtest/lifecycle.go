@@ -66,17 +66,21 @@ func setSucceeded(status *infrav1alpha1.IntegrationTestStatus) {
 
 // finishTest 完成测试，根据当前状态设置最终结果。
 // 先 patch 状态，成功后再发送 Event。
+// 注意：如果已经是终态且 CompletionTime 已设置，直接返回不发送 Event，避免重复。
 func (r *IntegrationTestReconciler) finishTest(ctx context.Context, it *infrav1alpha1.IntegrationTest) (ctrl.Result, error) {
-	// 如果已经失败，先 patch 再发送失败事件
+	// 如果已经完成（CompletionTime 已设置），直接返回（幂等性）
+	// 这避免了跨 reconcile 或同一 reconcile 内的重复 Event
+	if it.Status.CompletionTime != nil {
+		return ctrl.Result{}, nil
+	}
+
+	// 失败情况（UntilFailure 模式）：Phase 由 setStepFailed 设置，调用方已 patch
 	if it.Status.Phase == infrav1alpha1.IntegrationTestPhaseFailed {
-		if err := r.patchStatus(ctx, it, it.Status); err != nil {
-			return ctrl.Result{}, err
-		}
 		framework.EmitWarningEvent(r.Recorder, it, EventReasonIntegrationTestFailed, fmt.Sprintf("测试用例执行失败: %s", it.Status.Message))
 		return ctrl.Result{}, nil
 	}
 
-	// 设置为成功状态
+	// 成功情况
 	setSucceeded(&it.Status)
 	if err := r.patchStatus(ctx, it, it.Status); err != nil {
 		return ctrl.Result{}, err
