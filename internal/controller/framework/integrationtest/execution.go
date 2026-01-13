@@ -13,8 +13,9 @@ import (
 	"github.com/lunz1207/testplane/internal/controller/framework"
 )
 
+// 注意：发送 Event 前先用 APIReader 检查 API Server 最新状态，避免缓存延迟导致重复事件
+
 // executeTest 执行测试逻辑，根据模式选择顺序或并行执行。
-// 采用分散 patch 模式：在发送 Event 之前先 patch 状态。
 func (r *IntegrationTestReconciler) executeTest(ctx context.Context, it *infrav1alpha1.IntegrationTest) (ctrl.Result, error) {
 	if isTerminalPhase(it.Status.Phase) {
 		return ctrl.Result{}, nil

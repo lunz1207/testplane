@@ -13,8 +13,7 @@ import (
 	"github.com/lunz1207/testplane/internal/controller/framework/resource"
 )
 
-// 注意：本文件中的函数采用分散 patch 模式
-// 在发送 Event 之前先 patch 状态，避免 Event 重复
+// 注意：发送 Event 前先用 APIReader 检查 API Server 最新状态，避免缓存延迟导致重复事件
 
 // executeSequential 顺序执行测试步骤。
 func (r *IntegrationTestReconciler) executeSequential(ctx context.Context, it *infrav1alpha1.IntegrationTest) (ctrl.Result, error) {
@@ -125,7 +124,6 @@ func (r *IntegrationTestReconciler) executeParallel(ctx context.Context, it *inf
 	}
 
 	// 2. 并行应用所有步骤的资源
-	needPatch := false
 	for i, step := range steps {
 		stepStatus := &it.Status.Steps[i]
 		// 状态为空表示首次执行
@@ -140,23 +138,12 @@ func (r *IntegrationTestReconciler) executeParallel(ctx context.Context, it *inf
 				return r.handleStepFailure(ctx, it)
 			}
 			stepStatus.State = framework.StateRunning
-			needPatch = true
-			log.Info("resources applied", "step", step.Name)
-		}
-	}
-
-	// 批量 patch 所有首次执行的步骤状态，然后发送 Event
-	if needPatch {
-		if err := r.patchStatus(ctx, it, it.Status); err != nil {
-			return ctrl.Result{}, err
-		}
-		// patch 成功后发送所有 StepStarted 事件
-		for i, step := range steps {
-			stepStatus := &it.Status.Steps[i]
-			if stepStatus.State == framework.StateRunning && stepStatus.FinishedAt == nil {
-				// 只有刚启动的步骤才发送事件（通过检查是否有 FinishedAt）
-				framework.EmitNormalEvent(r.Recorder, it, EventReasonStepStarted, fmt.Sprintf("[Round %d] 开始执行步骤 %d: %s", it.Status.CurrentRound, i+1, step.Name))
+			// 先 patch，成功后再发 Event
+			if err := r.patchStatus(ctx, it, it.Status); err != nil {
+				return ctrl.Result{}, err
 			}
+			framework.EmitNormalEvent(r.Recorder, it, EventReasonStepStarted, fmt.Sprintf("[Round %d] 开始执行步骤 %d: %s", it.Status.CurrentRound, i+1, step.Name))
+			log.Info("resources applied", "step", step.Name)
 		}
 	}
 
@@ -212,8 +199,8 @@ func (r *IntegrationTestReconciler) executeParallel(ctx context.Context, it *inf
 // handleStepFailure 处理步骤失败，检查是否应该停止。
 // 先 patch 状态，成功后再发送 Event。
 func (r *IntegrationTestReconciler) handleStepFailure(ctx context.Context, it *infrav1alpha1.IntegrationTest) (ctrl.Result, error) {
-	// 幂等性检查：如果已经是终态，直接返回
-	if isTerminalPhase(it.Status.Phase) && it.Status.CompletionTime != nil {
+	// 检查 API Server 最新状态，避免重复事件
+	if r.testAlreadyCompleted(ctx, it) {
 		return ctrl.Result{}, nil
 	}
 

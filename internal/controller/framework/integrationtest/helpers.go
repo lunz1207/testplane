@@ -5,6 +5,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	infrav1alpha1 "github.com/lunz1207/testplane/api/v1alpha1"
 	"github.com/lunz1207/testplane/internal/controller/framework"
@@ -95,6 +96,35 @@ func nextStepIndex(statuses []infrav1alpha1.StepStatus) int {
 		}
 	}
 	return len(statuses)
+}
+
+// stepAlreadyFinished 从 API Server 读取最新状态，检查步骤是否已完成。
+// 用于在 patch 前检查，避免缓存延迟导致的重复事件。
+func (r *IntegrationTestReconciler) stepAlreadyFinished(ctx context.Context, it *infrav1alpha1.IntegrationTest, stepIndex int) bool {
+	if r.APIReader == nil {
+		return false
+	}
+	var latest infrav1alpha1.IntegrationTest
+	if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(it), &latest); err != nil {
+		return false
+	}
+	if stepIndex < 0 || stepIndex >= len(latest.Status.Steps) {
+		return false
+	}
+	return latest.Status.Steps[stepIndex].FinishedAt != nil
+}
+
+// testAlreadyCompleted 从 API Server 读取最新状态，检查测试是否已完成。
+// 用于在 patch 前检查，避免缓存延迟导致的重复事件。
+func (r *IntegrationTestReconciler) testAlreadyCompleted(ctx context.Context, it *infrav1alpha1.IntegrationTest) bool {
+	if r.APIReader == nil {
+		return false
+	}
+	var latest infrav1alpha1.IntegrationTest
+	if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(it), &latest); err != nil {
+		return false
+	}
+	return latest.Status.CompletionTime != nil
 }
 
 // Condition 类型常量
