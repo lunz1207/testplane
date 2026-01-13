@@ -30,28 +30,17 @@ type Expectation struct {
 
     // Params 函数参数（可选）
     Params runtime.RawExtension `json:"params,omitempty"`
-
-    // Resource K8s 资源数据源（可选，仅内置函数使用）
-    Resource *ExpectationResource `json:"resource,omitempty"`
 }
 ```
 
 **执行模式**：
-- **内置函数**：`Function` + `Resource`（可选）+ `Params`（可选）
+- **内置函数**：`Function` + `Params`（可选）
 - **Webhook**：`Function` + `Webhook` + `Params`（可选）
 
-#### ExpectationResource
-
-指定断言的目标资源。
-
-```go
-type ExpectationResource struct {
-    APIVersion string `json:"apiVersion"`
-    Kind       string `json:"kind"`
-    Name       string `json:"name"`
-    Namespace  string `json:"namespace,omitempty"`
-}
-```
+**资源选择**：
+断言的目标资源由上下文自动确定：
+- IntegrationTest: 使用当前 Step 的资源（template 或 selector）
+- LoadTest: 使用 Target 资源
 
 ### 条件配置
 
@@ -63,7 +52,8 @@ type ExpectationResource struct {
 
 ```go
 type WaitCondition struct {
-    // TimeoutSeconds 超时时间（秒），默认 300（超时模式使用）
+    // TimeoutSeconds 单次断言执行超时（秒），默认 10
+    // 控制单次检查的最大执行时间，超时则本次检查失败
     TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
 
     // IntervalSeconds 检查间隔（秒），默认 10（周期模式使用）
@@ -239,7 +229,7 @@ type TestStep struct {
 | `template` | `*ManifestAction` | 添加 | 创建/更新/删除资源 |
 | `selector` | `*ResourceSelector` | 不添加 | 只读引用，用于断言 |
 
-**默认资源选择**：当 `Expectation.Resource` 未指定时，断言默认检查当前步骤的资源。
+**默认资源选择**：断言默认检查当前步骤的资源（template 或 selector 指定的资源）。
 
 ### RepeatConfig
 

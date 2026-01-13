@@ -310,7 +310,7 @@ func (r *Reconciler) runExpectationsCheck(ctx, lt) (ctrl.Result, error) {
 | Target 处理 | `internal/controller/framework/loadtest/target.go` |
 | Workload 应用 | `internal/controller/framework/loadtest/workload.go` |
 | 环境注入 | `internal/controller/framework/loadtest/injection.go` |
-| 断言检查 | `internal/controller/framework/loadtest/checking.go` |
+| 运行期断言 | `internal/controller/framework/loadtest/running.go` |
 
 ---
 

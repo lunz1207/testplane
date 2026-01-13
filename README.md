@@ -399,7 +399,7 @@ workload:
 │       │   ├── target.go            # Target 处理
 │       │   ├── workload.go          # Workload 应用
 │       │   ├── injection.go         # 环境变量注入
-│       │   └── checking.go          # 断言检查
+│       │   └── running.go           # 运行期断言检查
 │       └── resource/                # 资源管理
 │           ├── manager.go           # 资源应用/删除/等待
 │           └── template.go          # 资源模板展开
