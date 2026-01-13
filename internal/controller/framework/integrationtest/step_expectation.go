@@ -31,6 +31,15 @@ const (
 func (r *IntegrationTestReconciler) checkStepExpectationsCore(ctx context.Context, it *infrav1alpha1.IntegrationTest, stepStatus *infrav1alpha1.StepStatus, step infrav1alpha1.TestStep, manifests []resource.ExpandedManifest) (stepExpectationOutcome, string) {
 	log := logf.FromContext(ctx)
 
+	// 幂等性检查：如果步骤已完成（FinishedAt 已设置），直接返回不发送事件
+	// 使用 FinishedAt 判断比 State 更可靠，可防止缓存部分更新导致的重复事件
+	if stepStatus.FinishedAt != nil && !stepStatus.FinishedAt.IsZero() {
+		if stepStatus.State == framework.StateSucceeded {
+			return outcomeSucceeded, ""
+		}
+		return outcomeFailed, ""
+	}
+
 	selectors := selectorsFromStep(step)
 	allExpectations := expectationsFromWaitCondition(step.Expectations)
 
