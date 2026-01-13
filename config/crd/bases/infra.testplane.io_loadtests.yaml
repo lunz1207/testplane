@@ -1,0 +1,575 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: loadtests.infra.testplane.io
+spec:
+  group: infra.testplane.io
+  names:
+    kind: LoadTest
+    listKind: LoadTestList
+    plural: loadtests
+    shortNames:
+    - lt
+    singular: loadtest
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.expectationsStatus.checkCount
+      name: Checks
+      priority: 1
+      type: integer
+    - jsonPath: .status.expectationsStatus.passCount
+      name: Pass
+      priority: 1
+      type: integer
+    - jsonPath: .status.expectationsStatus.failCount
+      name: Fail
+      priority: 1
+      type: integer
+    - jsonPath: .status.reason
+      name: Reason
+      priority: 1
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: LoadTest 表示一个负载测试。
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: LoadTestSpec 定义负载测试规格。
+            properties:
+              expectations:
+                description: |-
+                  Expectations 运行期断言（周期性执行）。
+                  使用 IntervalSeconds（检查间隔）和 FailureThreshold（连续失败阈值）。
+                properties:
+                  allOf:
+                    description: AllOf 所有期望都必须满足。
+                    items:
+                      description: |-
+                        Expectation 定义一个业务期望。
+                        支持两种模式：
+                        1. 内置函数：Function + Params（可选）
+                        2. Webhook：Function + Webhook + Params（可选）
+                        断言的资源由上下文自动确定：
+                        - IntegrationTest: 使用当前 Step 的资源（template 或 selector）
+                        - LoadTest: 使用 Target 资源
+                      properties:
+                        function:
+                          description: |-
+                            Function 函数名（必填）。
+                            - 无 Webhook 时：调用内置函数
+                            - 有 Webhook 时：传给 Webhook 表示执行哪个检查
+                          type: string
+                        params:
+                          description: Params 函数参数（可选）。
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                        webhook:
+                          description: |-
+                            Webhook 外部服务地址（可选）。
+                            有值时调用 Webhook，无值时调用内置函数。
+                          type: string
+                      required:
+                      - function
+                      type: object
+                    type: array
+                  anyOf:
+                    description: AnyOf 任一期望满足即可（可选）。
+                    items:
+                      description: |-
+                        Expectation 定义一个业务期望。
+                        支持两种模式：
+                        1. 内置函数：Function + Params（可选）
+                        2. Webhook：Function + Webhook + Params（可选）
+                        断言的资源由上下文自动确定：
+                        - IntegrationTest: 使用当前 Step 的资源（template 或 selector）
+                        - LoadTest: 使用 Target 资源
+                      properties:
+                        function:
+                          description: |-
+                            Function 函数名（必填）。
+                            - 无 Webhook 时：调用内置函数
+                            - 有 Webhook 时：传给 Webhook 表示执行哪个检查
+                          type: string
+                        params:
+                          description: Params 函数参数（可选）。
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                        webhook:
+                          description: |-
+                            Webhook 外部服务地址（可选）。
+                            有值时调用 Webhook，无值时调用内置函数。
+                          type: string
+                      required:
+                      - function
+                      type: object
+                    type: array
+                  failureThreshold:
+                    default: 3
+                    description: FailureThreshold 连续失败次数阈值，达到后判定失败，仅用于周期模式。
+                    format: int32
+                    type: integer
+                  intervalSeconds:
+                    default: 10
+                    description: IntervalSeconds 检查间隔（秒），仅用于周期模式。
+                    format: int32
+                    type: integer
+                  timeoutSeconds:
+                    default: 10
+                    description: |-
+                      TimeoutSeconds 单次断言执行超时（秒）。
+                      控制单次检查的最大执行时间，超时则本次检查失败。
+                    format: int32
+                    type: integer
+                type: object
+              target:
+                description: |-
+                  Target 被测目标资源。
+                  使用 Target.ReadyCondition 定义就绪条件，通过后才部署 Workload。
+                properties:
+                  readyCondition:
+                    description: |-
+                      ReadyCondition 就绪条件（可选）。
+                      创建/更新 Target 后，等待此条件满足才继续执行后续步骤。
+                    properties:
+                      allOf:
+                        description: AllOf 所有期望都必须满足。
+                        items:
+                          description: |-
+                            Expectation 定义一个业务期望。
+                            支持两种模式：
+                            1. 内置函数：Function + Params（可选）
+                            2. Webhook：Function + Webhook + Params（可选）
+                            断言的资源由上下文自动确定：
+                            - IntegrationTest: 使用当前 Step 的资源（template 或 selector）
+                            - LoadTest: 使用 Target 资源
+                          properties:
+                            function:
+                              description: |-
+                                Function 函数名（必填）。
+                                - 无 Webhook 时：调用内置函数
+                                - 有 Webhook 时：传给 Webhook 表示执行哪个检查
+                              type: string
+                            params:
+                              description: Params 函数参数（可选）。
+                              type: object
+                              x-kubernetes-preserve-unknown-fields: true
+                            webhook:
+                              description: |-
+                                Webhook 外部服务地址（可选）。
+                                有值时调用 Webhook，无值时调用内置函数。
+                              type: string
+                          required:
+                          - function
+                          type: object
+                        type: array
+                      anyOf:
+                        description: AnyOf 任一期望满足即可（可选）。
+                        items:
+                          description: |-
+                            Expectation 定义一个业务期望。
+                            支持两种模式：
+                            1. 内置函数：Function + Params（可选）
+                            2. Webhook：Function + Webhook + Params（可选）
+                            断言的资源由上下文自动确定：
+                            - IntegrationTest: 使用当前 Step 的资源（template 或 selector）
+                            - LoadTest: 使用 Target 资源
+                          properties:
+                            function:
+                              description: |-
+                                Function 函数名（必填）。
+                                - 无 Webhook 时：调用内置函数
+                                - 有 Webhook 时：传给 Webhook 表示执行哪个检查
+                              type: string
+                            params:
+                              description: Params 函数参数（可选）。
+                              type: object
+                              x-kubernetes-preserve-unknown-fields: true
+                            webhook:
+                              description: |-
+                                Webhook 外部服务地址（可选）。
+                                有值时调用 Webhook，无值时调用内置函数。
+                              type: string
+                          required:
+                          - function
+                          type: object
+                        type: array
+                      failureThreshold:
+                        default: 3
+                        description: FailureThreshold 连续失败次数阈值，达到后判定失败，仅用于周期模式。
+                        format: int32
+                        type: integer
+                      intervalSeconds:
+                        default: 10
+                        description: IntervalSeconds 检查间隔（秒），仅用于周期模式。
+                        format: int32
+                        type: integer
+                      timeoutSeconds:
+                        default: 10
+                        description: |-
+                          TimeoutSeconds 单次断言执行超时（秒）。
+                          控制单次检查的最大执行时间，超时则本次检查失败。
+                        format: int32
+                        type: integer
+                    type: object
+                  selector:
+                    description: Selector 目标资源选择器（与 Template 互斥）。
+                    properties:
+                      annotationSelector:
+                        additionalProperties:
+                          type: string
+                        description: AnnotationSelector 注解选择器（与 Name、LabelSelector
+                          互斥）。
+                        type: object
+                      apiVersion:
+                        description: APIVersion 资源的 API 版本。
+                        type: string
+                      kind:
+                        description: Kind 资源的类型。
+                        type: string
+                      labelSelector:
+                        additionalProperties:
+                          type: string
+                        description: LabelSelector 标签选择器（与 Name、AnnotationSelector
+                          互斥）。
+                        type: object
+                      name:
+                        description: Name 资源名称（与 LabelSelector/AnnotationSelector
+                          互斥）。
+                        type: string
+                      namespace:
+                        description: Namespace 资源的命名空间，为空时使用父资源的命名空间。
+                        type: string
+                    required:
+                    - apiVersion
+                    - kind
+                    type: object
+                  template:
+                    description: Template 目标资源模板（与 Selector 互斥）。
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                type: object
+              workload:
+                description: Workload 负载资源定义。
+                properties:
+                  envInjection:
+                    description: EnvInjection 环境变量注入列表（函数式）。
+                    items:
+                      description: |-
+                        EnvInjection 环境变量注入定义。
+                        使用 Extractor 从目标资源提取值注入环境变量。
+                      properties:
+                        extract:
+                          description: Extract 值提取器。
+                          properties:
+                            function:
+                              description: Function 提取函数名。
+                              type: string
+                            params:
+                              description: Params 函数参数。
+                              type: object
+                              x-kubernetes-preserve-unknown-fields: true
+                          required:
+                          - function
+                          type: object
+                        name:
+                          description: Name 环境变量名。
+                          type: string
+                      required:
+                      - extract
+                      - name
+                      type: object
+                    type: array
+                  resources:
+                    description: Resources 负载资源模板（支持多对象）。
+                    properties:
+                      selectors:
+                        description: Selectors 只读引用的资源列表。
+                        items:
+                          description: |-
+                            ResourceSelector 资源选择器（只读）。
+                            支持三种互斥的选择方式：
+                            1. Name：按名称精确选择单个资源
+                            2. LabelSelector：按标签选择资源
+                            3. AnnotationSelector：按注解选择资源
+                          properties:
+                            annotationSelector:
+                              additionalProperties:
+                                type: string
+                              description: AnnotationSelector 注解选择器（与 Name、LabelSelector
+                                互斥）。
+                              type: object
+                            apiVersion:
+                              description: APIVersion 资源的 API 版本。
+                              type: string
+                            kind:
+                              description: Kind 资源的类型。
+                              type: string
+                            labelSelector:
+                              additionalProperties:
+                                type: string
+                              description: LabelSelector 标签选择器（与 Name、AnnotationSelector
+                                互斥）。
+                              type: object
+                            name:
+                              description: Name 资源名称（与 LabelSelector/AnnotationSelector
+                                互斥）。
+                              type: string
+                            namespace:
+                              description: Namespace 资源的命名空间，为空时使用父资源的命名空间。
+                              type: string
+                          required:
+                          - apiVersion
+                          - kind
+                          type: object
+                        type: array
+                      templates:
+                        description: Templates 要创建/更新/删除的资源模板（支持 List/数组）。
+                        items:
+                          description: |-
+                            ResourceTemplate 资源模板（完整 K8s 对象或 List）。
+                            使用 TemplateAction 控制 Apply 或 Delete。
+                            Deprecated: 使用 ManifestAction 替代。
+                          properties:
+                            action:
+                              default: Apply
+                              description: Action 模板应用动作（默认 Apply）。
+                              enum:
+                              - Apply
+                              - Delete
+                              type: string
+                            name:
+                              description: Name 模板名称（可选，用于错误消息和调试）。
+                              type: string
+                            template:
+                              description: Template 完整的 K8s 对象或 List。
+                              type: object
+                              x-kubernetes-preserve-unknown-fields: true
+                          type: object
+                        type: array
+                    type: object
+                required:
+                - resources
+                type: object
+            required:
+            - target
+            - workload
+            type: object
+          status:
+            description: LoadTestStatus 记录负载测试状态。
+            properties:
+              completionTime:
+                description: CompletionTime 完成时间。
+                format: date-time
+                type: string
+              conditions:
+                description: Conditions 条件列表。
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              expectationsStatus:
+                description: ExpectationsStatus 断言检查状态。
+                properties:
+                  checkCount:
+                    description: CheckCount 已检查次数。
+                    format: int32
+                    type: integer
+                  consecutiveFailures:
+                    description: ConsecutiveFailures 连续失败次数。
+                    format: int32
+                    type: integer
+                  failCount:
+                    description: FailCount 失败次数。
+                    format: int32
+                    type: integer
+                  lastCheckTime:
+                    description: LastCheckTime 上次检查时间。
+                    format: date-time
+                    type: string
+                  lastResults:
+                    description: LastResults 最近一次检查结果摘要。
+                    items:
+                      description: |-
+                        ExpectationResultSummary 期望结果摘要（不含完整参数，用于状态存储优化）。
+                        用于在状态中存储历史检查结果，减少状态大小。
+                      properties:
+                        actual:
+                          description: Actual 实际值。
+                          type: string
+                        expect:
+                          description: Expect 期望函数名称。
+                          type: string
+                        message:
+                          description: Message 结果消息（截断至 256 字符）。
+                          type: string
+                        passed:
+                          description: Passed 是否通过。
+                          type: boolean
+                      required:
+                      - expect
+                      - passed
+                      type: object
+                    type: array
+                  passCount:
+                    description: PassCount 通过次数。
+                    format: int32
+                    type: integer
+                type: object
+              injectedValues:
+                additionalProperties:
+                  type: string
+                description: InjectedValues 已注入的值（便于调试）。
+                type: object
+              message:
+                description: Message 详细消息。
+                type: string
+              observedGeneration:
+                description: ObservedGeneration 已观察的 Generation。
+                format: int64
+                type: integer
+              phase:
+                description: Phase 测试阶段。
+                enum:
+                - Pending
+                - Initializing
+                - Running
+                - Succeeded
+                - Failed
+                type: string
+              readyConditionStatus:
+                description: ReadyConditionStatus 就绪条件检查状态。
+                properties:
+                  deadline:
+                    description: Deadline 截止时间。
+                    format: date-time
+                    type: string
+                  finishedAt:
+                    description: FinishedAt 完成时间。
+                    format: date-time
+                    type: string
+                  results:
+                    description: Results 期望结果。
+                    items:
+                      description: ExpectationResult 记录单个期望的执行结果。
+                      properties:
+                        actual:
+                          description: Actual 实际值。
+                          type: string
+                        expect:
+                          description: Expect 期望函数名称。
+                          type: string
+                        message:
+                          description: Message 结果消息。
+                          type: string
+                        params:
+                          description: Params 期望函数的参数。
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                        passed:
+                          description: Passed 是否通过。
+                          type: boolean
+                      required:
+                      - expect
+                      - passed
+                      type: object
+                    type: array
+                  startedAt:
+                    description: StartedAt 开始时间。
+                    format: date-time
+                    type: string
+                  state:
+                    description: State 状态：Pending, Passed, Failed。
+                    type: string
+                type: object
+              reason:
+                description: Reason 阶段原因。
+                type: string
+              startTime:
+                description: StartTime 开始时间。
+                format: date-time
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

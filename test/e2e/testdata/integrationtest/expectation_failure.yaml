@@ -1,0 +1,23 @@
+---
+apiVersion: infra.testplane.io/v1alpha1
+kind: IntegrationTest
+metadata:
+  name: e2e-expectation-failure
+  namespace: default
+  labels:
+    app.kubernetes.io/managed-by: testplane-e2e
+spec:
+  mode: Sequential
+  steps:
+    - name: verify-nonexistent-resource
+      timeoutSeconds: 30
+      # Use selector to reference a non-existent resource
+      selector:
+        apiVersion: v1
+        kind: ConfigMap
+        name: e2e-this-configmap-should-not-exist-anywhere
+      expectations:
+        timeoutSeconds: 10
+        allOf:
+          # This expectation will fail because the resource doesn't exist
+          - function: ResourceExists

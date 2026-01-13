@@ -1,0 +1,30 @@
+---
+apiVersion: infra.testplane.io/v1alpha1
+kind: IntegrationTest
+metadata:
+  name: e2e-timeout-test
+  namespace: default
+  labels:
+    app.kubernetes.io/managed-by: testplane-e2e
+spec:
+  mode: Sequential
+  steps:
+    - name: create-configmap
+      timeoutSeconds: 60
+      template:
+        manifest:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: e2e-timeout-cm
+            namespace: default
+            labels:
+              app.kubernetes.io/managed-by: testplane-e2e
+          data:
+            test: timeout
+      expectations:
+        # Very short timeout with impossible expectation
+        timeoutSeconds: 5
+        allOf:
+          # ResourceNotExists will fail because the ConfigMap is created above
+          - function: ResourceNotExists

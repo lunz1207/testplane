@@ -1,0 +1,46 @@
+---
+apiVersion: infra.testplane.io/v1alpha1
+kind: IntegrationTest
+metadata:
+  name: e2e-final-expectations
+  namespace: default
+  labels:
+    app.kubernetes.io/managed-by: testplane-e2e
+spec:
+  mode: Sequential
+  steps:
+    - name: create-configmap-1
+      timeoutSeconds: 60
+      template:
+        manifest:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: e2e-final-exp-cm-1
+            namespace: default
+            labels:
+              app.kubernetes.io/managed-by: testplane-e2e
+          data:
+            key: value1
+      expectations:
+        timeoutSeconds: 30
+        allOf:
+          - function: ResourceExists
+
+    - name: create-configmap-2
+      timeoutSeconds: 60
+      template:
+        manifest:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: e2e-final-exp-cm-2
+            namespace: default
+            labels:
+              app.kubernetes.io/managed-by: testplane-e2e
+          data:
+            key: value2
+      expectations:
+        timeoutSeconds: 30
+        allOf:
+          - function: ResourceExists

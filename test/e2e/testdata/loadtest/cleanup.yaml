@@ -1,0 +1,69 @@
+---
+apiVersion: infra.testplane.io/v1alpha1
+kind: LoadTest
+metadata:
+  name: e2e-loadtest-cleanup
+  namespace: default
+  labels:
+    app.kubernetes.io/managed-by: testplane-e2e
+spec:
+  target:
+    template:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: e2e-loadtest-cleanup-target
+        namespace: default
+        labels:
+          app.kubernetes.io/managed-by: testplane-e2e
+          app: e2e-loadtest-cleanup-target
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: e2e-loadtest-cleanup-target
+        template:
+          metadata:
+            labels:
+              app: e2e-loadtest-cleanup-target
+          spec:
+            containers:
+              - name: nginx
+                image: library/nginx:1.14
+                ports:
+                  - containerPort: 80
+    readyCondition:
+      timeoutSeconds: 120
+      allOf:
+        - function: ResourceExists
+  workload:
+    resources:
+      templates:
+        - template:
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: e2e-loadtest-cleanup-workload
+              namespace: default
+              labels:
+                app.kubernetes.io/managed-by: testplane-e2e
+                app: e2e-loadtest-cleanup-workload
+            spec:
+              replicas: 1
+              selector:
+                matchLabels:
+                  app: e2e-loadtest-cleanup-workload
+              template:
+                metadata:
+                  labels:
+                    app: e2e-loadtest-cleanup-workload
+                spec:
+                  containers:
+                    - name: busybox
+                      image: library/busybox:1.31.1
+                      command: ["/bin/sh", "-c", "while true; do sleep 30; done"]
+  expectations:
+    failureThreshold: 3
+    intervalSeconds: 30
+    allOf:
+      - function: ResourceExists

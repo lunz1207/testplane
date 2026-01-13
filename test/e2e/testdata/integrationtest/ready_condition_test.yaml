@@ -1,0 +1,63 @@
+---
+apiVersion: infra.testplane.io/v1alpha1
+kind: IntegrationTest
+metadata:
+  name: e2e-ready-condition-test
+  namespace: default
+  labels:
+    app.kubernetes.io/managed-by: testplane-e2e
+spec:
+  mode: Sequential
+  steps:
+    - name: create-deployment-with-ready-condition
+      timeoutSeconds: 120
+      template:
+        manifest:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: e2e-ready-condition-nginx
+            namespace: default
+            labels:
+              app.kubernetes.io/managed-by: testplane-e2e
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: e2e-ready-condition-nginx
+            template:
+              metadata:
+                labels:
+                  app: e2e-ready-condition-nginx
+              spec:
+                containers:
+                  - name: nginx
+                    image: library/nginx:1.14
+                    ports:
+                      - containerPort: 80
+      # Step-level readyCondition: wait for deployment to be ready before proceeding
+      readyCondition:
+        timeoutSeconds: 90
+        allOf:
+          - function: DeploymentReady
+      # Business expectations after ready
+      expectations:
+        timeoutSeconds: 30
+        allOf:
+          - function: ResourceExists
+          - function: DeploymentAvailable
+
+    - name: cleanup-deployment
+      timeoutSeconds: 60
+      template:
+        action: Delete
+        manifest:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: e2e-ready-condition-nginx
+            namespace: default
+      expectations:
+        timeoutSeconds: 60
+        allOf:
+          - function: ResourceNotExists

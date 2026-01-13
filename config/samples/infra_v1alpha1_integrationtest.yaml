@@ -1,0 +1,164 @@
+---
+apiVersion: infra.testplane.io/v1alpha1
+kind: IntegrationTest
+metadata:
+  name: sequential-deployment-integrationtest-sample
+  labels:
+    app.kubernetes.io/name: testplane
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  mode: Sequential
+  repeat:
+    count: 2
+    delayBetweenRounds: 60
+  steps:
+    - name: 创建 Deployment
+      timeoutSeconds: 600
+      template:
+        manifest:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: nginx
+          spec:
+            replicas: 2
+            selector:
+              matchLabels:
+                app: nginx
+            template:
+              metadata:
+                labels:
+                  app: nginx
+              spec:
+                containers:
+                  - name: nginx
+                    image: library/nginx:1.14
+                    ports:
+                      - containerPort: 80
+                    imagePullPolicy: IfNotPresent
+      expectations:
+        allOf:
+          - function: ResourceExists
+
+    - name: 扩容
+      template:
+        manifest:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: nginx
+          spec:
+            replicas: 3
+            selector:
+              matchLabels:
+                app: nginx
+            template:
+              metadata:
+                labels:
+                  app: nginx
+              spec:
+                containers:
+                  - name: nginx
+                    image: library/nginx:1.14
+                    ports:
+                      - containerPort: 80
+                    imagePullPolicy: IfNotPresent
+      expectations:
+        allOf:
+          - function: ResourceExists
+
+    - name: 缩容
+      template:
+        manifest:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: nginx
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: nginx
+            template:
+              metadata:
+                labels:
+                  app: nginx
+              spec:
+                containers:
+                  - name: nginx
+                    image: library/nginx:1.14
+                    ports:
+                      - containerPort: 80
+                    imagePullPolicy: IfNotPresent
+      expectations:
+        allOf:
+          - function: ResourceExists
+
+    - name: 增加标签
+      template:
+        manifest:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: nginx
+            labels:
+              app.kubernetes.io/name: testplane
+              app.kubernetes.io/managed-by: kustomize
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: nginx
+            template:
+              metadata:
+                labels:
+                  app: nginx
+              spec:
+                containers:
+                  - name: nginx
+                    image: library/nginx:1.14
+                    ports:
+                      - containerPort: 80
+                    imagePullPolicy: IfNotPresent
+      expectations:
+        allOf:
+          - function: ResourceExists
+
+    - name: 删除标签
+      template:
+        manifest:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: nginx
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: nginx
+            template:
+              metadata:
+                labels:
+                  app: nginx
+              spec:
+                containers:
+                  - name: nginx
+                    image: library/nginx:1.14
+                    ports:
+                      - containerPort: 80
+                    imagePullPolicy: IfNotPresent
+      expectations:
+        allOf:
+          - function: ResourceExists
+
+    - name: 删除 Deployment
+      template:
+        manifest:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: nginx
+        action: Delete
+      expectations:
+        allOf:
+          - function: ResourceNotExists

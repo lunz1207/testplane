@@ -1,0 +1,54 @@
+---
+apiVersion: infra.testplane.io/v1alpha1
+kind: IntegrationTest
+metadata:
+  name: e2e-cleanup-test
+  namespace: default
+  labels:
+    app.kubernetes.io/managed-by: testplane-e2e
+spec:
+  mode: Sequential
+  steps:
+    - name: create-deployment
+      timeoutSeconds: 120
+      template:
+        manifest:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: e2e-cleanup-nginx
+            namespace: default
+            labels:
+              app.kubernetes.io/managed-by: testplane-e2e
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: e2e-cleanup-nginx
+            template:
+              metadata:
+                labels:
+                  app: e2e-cleanup-nginx
+              spec:
+                containers:
+                  - name: nginx
+                    image: library/nginx:1.14
+                    ports:
+                      - containerPort: 80
+      expectations:
+        timeoutSeconds: 60
+        allOf:
+          - function: ResourceExists
+
+    - name: wait-for-deployment
+      timeoutSeconds: 300
+      # Just wait - the deployment should stay running
+      # This gives us time to test deletion during running state
+      selector:
+        apiVersion: apps/v1
+        kind: Deployment
+        name: e2e-cleanup-nginx
+      expectations:
+        timeoutSeconds: 240
+        allOf:
+          - function: ResourceExists

@@ -1,0 +1,239 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package resource
+
+import (
+	"encoding/json"
+	"fmt"
+	"regexp"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+
+	infrav1alpha1 "github.com/lunz1207/testplane/api/v1alpha1"
+)
+
+// ExpandManifests 将 ManifestAction 列表展开为 ExpandedManifest 列表（支持 List/数组）。
+func ExpandManifests(manifests []infrav1alpha1.ManifestAction, defaultNamespace string) ([]ExpandedManifest, error) {
+	if len(manifests) == 0 {
+		return nil, nil
+	}
+
+	var result []ExpandedManifest
+	for _, m := range manifests {
+		expanded, err := ExpandManifest(m, defaultNamespace)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, expanded...)
+	}
+
+	return result, nil
+}
+
+// ExpandManifest 展开单个 ManifestAction（支持 List/数组）。
+func ExpandManifest(m infrav1alpha1.ManifestAction, defaultNamespace string) ([]ExpandedManifest, error) {
+	if len(m.Manifest.Raw) == 0 {
+		return nil, fmt.Errorf("manifest is empty")
+	}
+
+	action := m.Action
+	if action == "" {
+		action = infrav1alpha1.TemplateActionApply
+	}
+
+	return expandRaw(m.Manifest.Raw, defaultNamespace, action)
+}
+
+// ExpandRawTemplate 展开单个 RawExtension 模板（供 LoadTest 使用）。
+func ExpandRawTemplate(template *runtime.RawExtension, defaultNamespace string) (*ExpandedManifest, error) {
+	if template == nil || len(template.Raw) == 0 {
+		return nil, fmt.Errorf("template is empty")
+	}
+
+	results, err := expandRaw(template.Raw, defaultNamespace, infrav1alpha1.TemplateActionApply)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(results) == 0 {
+		return nil, fmt.Errorf("no resources found in template")
+	}
+
+	if len(results) > 1 {
+		return nil, fmt.Errorf("template contains multiple resources, expected single resource")
+	}
+
+	return &results[0], nil
+}
+
+// ExpandTemplates 将 ResourcesSpec 的模板展开为 ExpandedManifest 列表（支持 List/数组）。
+// replacements 用于对模板内容进行占位符替换（用于 workload 注入）。
+func ExpandTemplates(resources *infrav1alpha1.ResourcesSpec, defaultNamespace string, replacements map[string]string) ([]ExpandedManifest, error) {
+	if resources == nil {
+		return nil, nil
+	}
+
+	var result []ExpandedManifest
+	for _, tmpl := range resources.Templates {
+		expanded, err := ExpandResourceTemplate(tmpl, defaultNamespace, replacements)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, expanded...)
+	}
+
+	return result, nil
+}
+
+// ExpandResourceTemplate 展开单个 ResourceTemplate（支持 List/数组）。
+func ExpandResourceTemplate(tmpl infrav1alpha1.ResourceTemplate, defaultNamespace string, replacements map[string]string) ([]ExpandedManifest, error) {
+	if len(tmpl.Template.Raw) == 0 {
+		return nil, fmt.Errorf("template is empty")
+	}
+
+	action := tmpl.Action
+	if action == "" {
+		action = infrav1alpha1.TemplateActionApply
+	}
+
+	raw := tmpl.Template.Raw
+	if len(replacements) > 0 {
+		raw = ApplyReplacements(raw, replacements)
+	}
+
+	return expandRaw(raw, defaultNamespace, action)
+}
+
+// ApplyReplacements 使用 ${VAR} 形式的占位符做字符串替换。
+func ApplyReplacements(raw []byte, replacements map[string]string) []byte {
+	re := regexp.MustCompile(`\$\{([^}]+)\}`)
+	content := re.ReplaceAllStringFunc(string(raw), func(match string) string {
+		key := match[2 : len(match)-1]
+		if val, ok := replacements[key]; ok {
+			return val
+		}
+		return match
+	})
+	return []byte(content)
+}
+
+// expandRaw 将 JSON 原始数据展开为 ExpandedManifest 列表。
+func expandRaw(raw []byte, defaultNamespace string, action infrav1alpha1.TemplateAction) ([]ExpandedManifest, error) {
+	var data interface{}
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return nil, fmt.Errorf("unmarshal template: %w", err)
+	}
+
+	switch obj := data.(type) {
+	case map[string]interface{}:
+		// 如果包含 items，则按 List 处理
+		if items, ok := obj["items"].([]interface{}); ok {
+			return expandItemList(items, defaultNamespace, action)
+		}
+		manifest, err := toExpandedManifest(obj, defaultNamespace, action)
+		if err != nil {
+			return nil, err
+		}
+		return []ExpandedManifest{manifest}, nil
+	case []interface{}:
+		return expandItemList(obj, defaultNamespace, action)
+	default:
+		return nil, fmt.Errorf("template must be object or list")
+	}
+}
+
+// expandItemList 将 List/数组展开为 ExpandedManifest 列表。
+func expandItemList(items []interface{}, defaultNamespace string, action infrav1alpha1.TemplateAction) ([]ExpandedManifest, error) {
+	result := make([]ExpandedManifest, 0, len(items))
+	for i, item := range items {
+		obj, ok := item.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("list item %d is not an object", i)
+		}
+		manifest, err := toExpandedManifest(obj, defaultNamespace, action)
+		if err != nil {
+			return nil, fmt.Errorf("list item %d: %w", i, err)
+		}
+		result = append(result, manifest)
+	}
+	return result, nil
+}
+
+// toExpandedManifest 将模板对象转换为 ExpandedManifest。
+func toExpandedManifest(obj map[string]interface{}, defaultNamespace string, action infrav1alpha1.TemplateAction) (ExpandedManifest, error) {
+	apiVersion, _ := obj["apiVersion"].(string)
+	kind, _ := obj["kind"].(string)
+	if apiVersion == "" || kind == "" {
+		return ExpandedManifest{}, fmt.Errorf("apiVersion and kind are required")
+	}
+
+	metadata, _ := obj["metadata"].(map[string]interface{})
+	name, _ := metadata["name"].(string)
+	if name == "" {
+		return ExpandedManifest{}, fmt.Errorf("metadata.name is required")
+	}
+
+	namespace := defaultNamespace
+	if ns, ok := metadata["namespace"].(string); ok && ns != "" {
+		namespace = ns
+	}
+
+	// 构建 Unstructured 对象
+	u := &unstructured.Unstructured{}
+	u.SetAPIVersion(apiVersion)
+	u.SetKind(kind)
+	u.SetName(name)
+	u.SetNamespace(namespace)
+
+	// 从 metadata 中提取 labels 和 annotations
+	if labels, ok := metadata["labels"].(map[string]interface{}); ok {
+		labelMap := make(map[string]string, len(labels))
+		for k, v := range labels {
+			if s, ok := v.(string); ok {
+				labelMap[k] = s
+			}
+		}
+		u.SetLabels(labelMap)
+	}
+	if annotations, ok := metadata["annotations"].(map[string]interface{}); ok {
+		annotationMap := make(map[string]string, len(annotations))
+		for k, v := range annotations {
+			if s, ok := v.(string); ok {
+				annotationMap[k] = s
+			}
+		}
+		u.SetAnnotations(annotationMap)
+	}
+
+	// 对于 Apply 操作，提取内容字段（spec, data 等）
+	if action == infrav1alpha1.TemplateActionApply {
+		for k, v := range obj {
+			if k == "apiVersion" || k == "kind" || k == "metadata" {
+				continue
+			}
+			if err := unstructured.SetNestedField(u.Object, v, k); err != nil {
+				return ExpandedManifest{}, fmt.Errorf("set field %q: %w", k, err)
+			}
+		}
+	}
+
+	return ExpandedManifest{
+		Object: u,
+		Action: action,
+	}, nil
+}

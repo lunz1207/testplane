@@ -1,0 +1,64 @@
+---
+apiVersion: infra.testplane.io/v1alpha1
+kind: IntegrationTest
+metadata:
+  name: e2e-parallel-basic
+  namespace: default
+  labels:
+    app.kubernetes.io/managed-by: testplane-e2e
+spec:
+  mode: Parallel
+  steps:
+    - name: create-configmap-1
+      timeoutSeconds: 120
+      template:
+        manifest:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: e2e-parallel-cm-1
+            namespace: default
+            labels:
+              app.kubernetes.io/managed-by: testplane-e2e
+          data:
+            key1: value1
+      expectations:
+        timeoutSeconds: 60
+        allOf:
+          - function: ResourceExists
+
+    - name: create-configmap-2
+      timeoutSeconds: 120
+      template:
+        manifest:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: e2e-parallel-cm-2
+            namespace: default
+            labels:
+              app.kubernetes.io/managed-by: testplane-e2e
+          data:
+            key2: value2
+      expectations:
+        timeoutSeconds: 60
+        allOf:
+          - function: ResourceExists
+
+    - name: create-configmap-3
+      timeoutSeconds: 120
+      template:
+        manifest:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: e2e-parallel-cm-3
+            namespace: default
+            labels:
+              app.kubernetes.io/managed-by: testplane-e2e
+          data:
+            key3: value3
+      expectations:
+        timeoutSeconds: 60
+        allOf:
+          - function: ResourceExists

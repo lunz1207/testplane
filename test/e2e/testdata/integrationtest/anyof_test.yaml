@@ -1,0 +1,47 @@
+---
+apiVersion: infra.testplane.io/v1alpha1
+kind: IntegrationTest
+metadata:
+  name: e2e-anyof-test
+  namespace: default
+  labels:
+    app.kubernetes.io/managed-by: testplane-e2e
+spec:
+  mode: Sequential
+  steps:
+    - name: create-configmap
+      timeoutSeconds: 60
+      template:
+        manifest:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: e2e-anyof-cm
+            namespace: default
+            labels:
+              app.kubernetes.io/managed-by: testplane-e2e
+          data:
+            key: value
+      expectations:
+        timeoutSeconds: 30
+        # Test anyOf: at least one expectation should pass
+        anyOf:
+          # ResourceExists should pass on the created ConfigMap
+          - function: ResourceExists
+          # ResourceNotExists will fail on the created ConfigMap, but anyOf should still pass
+          - function: ResourceNotExists
+
+    - name: delete-configmap
+      timeoutSeconds: 60
+      template:
+        action: Delete
+        manifest:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: e2e-anyof-cm
+            namespace: default
+      expectations:
+        timeoutSeconds: 30
+        allOf:
+          - function: ResourceNotExists

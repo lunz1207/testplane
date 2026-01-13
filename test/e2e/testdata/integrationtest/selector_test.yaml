@@ -1,0 +1,54 @@
+---
+# Pre-create the ConfigMap that will be referenced by selector
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: e2e-selector-pre-existing
+  namespace: default
+  labels:
+    app.kubernetes.io/managed-by: testplane-e2e
+    test-type: selector
+data:
+  key: pre-existing-value
+---
+apiVersion: infra.testplane.io/v1alpha1
+kind: IntegrationTest
+metadata:
+  name: e2e-selector-test
+  namespace: default
+  labels:
+    app.kubernetes.io/managed-by: testplane-e2e
+spec:
+  mode: Sequential
+  steps:
+    # Step 1: Use selector to reference existing resource (read-only)
+    - name: verify-existing-configmap
+      timeoutSeconds: 60
+      selector:
+        apiVersion: v1
+        kind: ConfigMap
+        namespace: default
+        name: e2e-selector-pre-existing
+      expectations:
+        timeoutSeconds: 30
+        allOf:
+          - function: ResourceExists
+
+    # Step 2: Create a new resource
+    - name: create-new-configmap
+      timeoutSeconds: 60
+      template:
+        manifest:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: e2e-selector-new-cm
+            namespace: default
+            labels:
+              app.kubernetes.io/managed-by: testplane-e2e
+          data:
+            key: new-value
+      expectations:
+        timeoutSeconds: 30
+        allOf:
+          - function: ResourceExists

@@ -1,0 +1,46 @@
+---
+apiVersion: infra.testplane.io/v1alpha1
+kind: IntegrationTest
+metadata:
+  name: e2e-repeat-test
+  namespace: default
+  labels:
+    app.kubernetes.io/managed-by: testplane-e2e
+spec:
+  mode: Sequential
+  repeat:
+    count: 2
+    delayBetweenRounds: 5
+  steps:
+    - name: create-configmap
+      timeoutSeconds: 60
+      template:
+        manifest:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: e2e-repeat-cm
+            namespace: default
+            labels:
+              app.kubernetes.io/managed-by: testplane-e2e
+          data:
+            round: "current"
+      expectations:
+        timeoutSeconds: 30
+        allOf:
+          - function: ResourceExists
+
+    - name: delete-configmap
+      timeoutSeconds: 60
+      template:
+        action: Delete
+        manifest:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: e2e-repeat-cm
+            namespace: default
+      expectations:
+        timeoutSeconds: 30
+        allOf:
+          - function: ResourceNotExists

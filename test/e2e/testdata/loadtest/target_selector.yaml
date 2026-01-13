@@ -1,0 +1,80 @@
+---
+# Pre-create the target deployment that will be referenced by selector
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: e2e-lt-selector-target
+  namespace: default
+  labels:
+    app.kubernetes.io/managed-by: testplane-e2e
+    test-type: target-selector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: e2e-lt-selector-target
+  template:
+    metadata:
+      labels:
+        app: e2e-lt-selector-target
+    spec:
+      containers:
+        - name: nginx
+          image: library/nginx:1.14
+          ports:
+            - containerPort: 80
+---
+apiVersion: infra.testplane.io/v1alpha1
+kind: LoadTest
+metadata:
+  name: e2e-loadtest-selector
+  namespace: default
+  labels:
+    app.kubernetes.io/managed-by: testplane-e2e
+spec:
+  target:
+    # Use selector to reference existing deployment instead of template
+    selector:
+      apiVersion: apps/v1
+      kind: Deployment
+      namespace: default
+      name: e2e-lt-selector-target
+    readyCondition:
+      timeoutSeconds: 120
+      allOf:
+        - function: DeploymentReady
+
+  workload:
+    envInjection:
+      - name: TARGET_NAME
+        extract:
+          function: FieldPath
+          params:
+            path: metadata.name
+    resources:
+      templates:
+        - name: workload-pod
+          template:
+            apiVersion: v1
+            kind: Pod
+            metadata:
+              name: e2e-lt-selector-workload
+              namespace: default
+              labels:
+                app.kubernetes.io/managed-by: testplane-e2e
+            spec:
+              restartPolicy: Never
+              terminationGracePeriodSeconds: 1
+              containers:
+                - name: busybox
+                  image: busybox:1.36
+                  command: ["sh", "-c", "echo Target: $TARGET_NAME && sleep 3600"]
+                  env:
+                    - name: TARGET_NAME
+                      value: "placeholder"
+
+  expectations:
+    intervalSeconds: 10
+    failureThreshold: 3
+    allOf:
+      - function: ResourceExists

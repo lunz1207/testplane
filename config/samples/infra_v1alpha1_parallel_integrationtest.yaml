@@ -1,0 +1,66 @@
+# Parallel mode
+---
+apiVersion: infra.testplane.io/v1alpha1
+kind: IntegrationTest
+metadata:
+  name: parallel-cluster-integrationtest-sample
+  labels:
+    app.kubernetes.io/name: testplane
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  mode: Parallel
+  repeat:
+    count: 1
+    delayBetweenRounds: 10
+  steps:
+    - name: 创建1.4.1版本两节点集群
+      timeoutSeconds: 600
+      template:
+        manifest:
+          apiVersion: infra.qingcloud.test/v1alpha1
+          kind: Cluster
+          metadata:
+            name: cluster-sample-1
+          spec:
+            owner: "usr-hRAmdSn6"
+            zone: "pek3b"
+            appVersionRef:
+              name: mysql-plus-1.4.1
+            confOverrides:
+              cluster:
+                vpc_router_id: rtr-qk0rurp3
+                vxnet: vxnet-0hqwk3e
+                maininstance:
+                  count: 2
+      expectations:
+        allOf:
+          - function: ClusterReady
+          - function: ClusterNodeCount
+            params:
+              expected: 2
+
+    - name: 创建1.5.0版本三节点集群
+      timeoutSeconds: 600
+      template:
+        manifest:
+          apiVersion: infra.qingcloud.test/v1alpha1
+          kind: Cluster
+          metadata:
+            name: cluster-sample-2
+          spec:
+            owner: "usr-hRAmdSn6"
+            zone: "pek3b"
+            appVersionRef:
+              name: mysql-plus-1.5.0
+            confOverrides:
+              cluster:
+                vpc_router_id: rtr-qk0rurp3
+                vxnet: vxnet-0hqwk3e
+                maininstance:
+                  count: 3
+      expectations:
+        allOf:
+          - function: ClusterReady
+          - function: ClusterNodeCount
+            params:
+              expected: 3
