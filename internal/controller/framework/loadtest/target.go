@@ -122,8 +122,8 @@ func (r *LoadTestReconciler) checkReadyCondition(
 		lt.Status.ReadyConditionStatus.State = framework.StatePassed
 		lt.Status.ReadyConditionStatus.FinishedAt = &now
 
-		framework.EmitNormalEvent(r.Recorder, lt, EventReasonTargetReady, "Target is ready")
-		return r.transitionToRunning(ctx, lt)
+		// Event 移至 transitionToRunning 中 patch 之后发送，避免重复
+		return r.transitionToRunning(ctx, lt, true)
 	}
 
 	// 设置 TargetReady Condition 为等待中
