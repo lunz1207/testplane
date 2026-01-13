@@ -2,7 +2,6 @@ package integrationtest
 
 import (
 	"context"
-	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -66,21 +65,15 @@ func setSucceeded(status *infrav1alpha1.IntegrationTestStatus) {
 
 // finishTest 完成测试，根据当前状态设置最终结果。
 // 先 patch 状态，成功后再发送 Event。
-// 注意：如果已经是终态且 CompletionTime 已设置，直接返回不发送 Event，避免重复。
+// 注意：使用 isTerminalPhase 和 CompletionTime 双重检查确保幂等性。
 func (r *IntegrationTestReconciler) finishTest(ctx context.Context, it *infrav1alpha1.IntegrationTest) (ctrl.Result, error) {
-	// 如果已经完成（CompletionTime 已设置），直接返回（幂等性）
-	// 这避免了跨 reconcile 或同一 reconcile 内的重复 Event
-	if it.Status.CompletionTime != nil {
+	// 幂等性检查：如果已经是终态或 CompletionTime 已设置，直接返回
+	// 使用双重检查防止缓存部分更新导致的重复事件
+	if isTerminalPhase(it.Status.Phase) || it.Status.CompletionTime != nil {
 		return ctrl.Result{}, nil
 	}
 
-	// 失败情况（UntilFailure 模式）：Phase 由 setStepFailed 设置，调用方已 patch
-	if it.Status.Phase == infrav1alpha1.IntegrationTestPhaseFailed {
-		framework.EmitWarningEvent(r.Recorder, it, EventReasonIntegrationTestFailed, fmt.Sprintf("测试用例执行失败: %s", it.Status.Message))
-		return ctrl.Result{}, nil
-	}
-
-	// 成功情况
+	// 成功情况（Phase 还不是终态）
 	setSucceeded(&it.Status)
 	if err := r.patchStatus(ctx, it, it.Status); err != nil {
 		return ctrl.Result{}, err

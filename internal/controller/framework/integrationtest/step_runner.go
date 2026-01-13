@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -211,10 +212,20 @@ func (r *IntegrationTestReconciler) executeParallel(ctx context.Context, it *inf
 // handleStepFailure 处理步骤失败，检查是否应该停止。
 // 先 patch 状态，成功后再发送 Event。
 func (r *IntegrationTestReconciler) handleStepFailure(ctx context.Context, it *infrav1alpha1.IntegrationTest) (ctrl.Result, error) {
-	if it.Spec.Repeat != nil && it.Spec.Repeat.UntilFailure {
-		return r.finishTest(ctx, it)
+	// 幂等性检查：如果已经是终态，直接返回
+	if isTerminalPhase(it.Status.Phase) && it.Status.CompletionTime != nil {
+		return ctrl.Result{}, nil
 	}
-	// 注意：状态已在调用方 patch，这里只发送 Event
+
+	if it.Spec.Repeat != nil && it.Spec.Repeat.UntilFailure {
+		// UntilFailure 模式：设置 CompletionTime 完成测试
+		now := metav1.Now()
+		it.Status.CompletionTime = &now
+		if err := r.patchStatus(ctx, it, it.Status); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	// 发送失败事件（状态已在调用方或上面 patch）
 	framework.EmitWarningEvent(r.Recorder, it, EventReasonIntegrationTestFailed, fmt.Sprintf("测试用例执行失败: %s", it.Status.Message))
 	return ctrl.Result{}, nil
 }
