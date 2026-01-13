@@ -21,7 +21,7 @@
 │  │    CRD 定义层        │                                                                │
 │  │ (api/v1alpha1/)     │                                                                │
 │  │                     │                                                                │
-│  │ • Expectation       │ ←── 单个断言定义 (Function/Webhook/Params/Resource)            │
+│  │ • Expectation       │ ←── 单个断言定义 (Function/Webhook/Params)                     │
 │  │ • WaitCondition     │ ←── 统一断言条件 (超时模式 / 周期模式)                           │
 │  │ • ExpectationResult │ ←── 断言结果记录                                                │
 │  └──────────┬──────────┘                                                                │
@@ -73,7 +73,7 @@
 ### Expectation
 
 单个断言定义，支持两种模式：
-1. **内置函数**：Function + Resource（可选）+ Params（可选）
+1. **内置函数**：Function + Params（可选）
 2. **Webhook**：Function + Webhook + Params（可选）
 
 ```go
@@ -89,29 +89,12 @@ type Expectation struct {
 
     // Params 函数参数（可选）
     Params runtime.RawExtension `json:"params,omitempty"`
-
-    // Resource K8s 资源数据源（可选，仅内置函数使用）
-    // 不指定则使用当前步骤的资源
-    Resource *ExpectationResource `json:"resource,omitempty"`
 }
 ```
 
-### ExpectationResource
-
-指定断言的目标资源。
-
-```go
-type ExpectationResource struct {
-    // APIVersion 资源的 API 版本
-    APIVersion string `json:"apiVersion"`
-    // Kind 资源的类型
-    Kind string `json:"kind"`
-    // Name 资源名称
-    Name string `json:"name"`
-    // Namespace 资源命名空间（可选，默认使用父资源命名空间）
-    Namespace string `json:"namespace,omitempty"`
-}
-```
+**资源选择**：断言的目标资源由上下文自动确定：
+- IntegrationTest: 使用当前 Step 的资源（template 或 selector）
+- LoadTest: 使用 Target 资源
 
 ### WaitCondition
 
@@ -119,8 +102,9 @@ type ExpectationResource struct {
 
 ```go
 type WaitCondition struct {
-    // TimeoutSeconds 超时时间（秒），默认 300（超时模式使用）
-    // +kubebuilder:default=300
+    // TimeoutSeconds 单次断言执行超时（秒），默认 10
+    // 控制单次检查的最大执行时间，超时则本次检查失败
+    // +kubebuilder:default=10
     TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
 
     // IntervalSeconds 检查间隔（秒），默认 10（周期模式使用）
@@ -504,39 +488,9 @@ func CheckResourceNotReady(obj *unstructured.Unstructured) (bool, string) {
 
 ### 状态选择策略
 
-当 `Expectation.Resource` 未指定时，断言会按以下策略选择目标资源：
+断言会按以下策略自动选择目标资源：
 
 ```go
-// SelectStateByResource 根据 ExpectationResource 选择目标资源
-// state 的 key 格式是 "apiVersion/kind/name"
-func SelectStateByResource(state map[string]interface{}, res *ExpectationResource) map[string]interface{} {
-    for key, v := range state {
-        parts := strings.Split(key, "/")
-        if len(parts) < 3 {
-            continue
-        }
-
-        keyKind := parts[len(parts)-2]
-        keyName := parts[len(parts)-1]
-        keyAPIVersion := strings.Join(parts[:len(parts)-2], "/")
-
-        if res.APIVersion != "" && res.APIVersion != keyAPIVersion {
-            continue
-        }
-        if res.Kind != "" && res.Kind != keyKind {
-            continue
-        }
-        if res.Name != keyName {
-            continue
-        }
-
-        if m, ok := v.(map[string]interface{}); ok {
-            return m
-        }
-    }
-    return map[string]interface{}{}
-}
-
 // SelectStateForExpectation 自动选择最适合期望使用的对象
 func SelectStateForExpectation(state map[string]interface{}) map[string]interface{} {
     // 单资源：直接展开
@@ -638,24 +592,21 @@ func (r ExpectationResults) Passed() bool {
 
 ```go
 // runExpectation 执行单个期望检查
+// 支持两种模式：
+// 1. 内置函数：Function + Params（可选）
+// 2. Webhook：Function + Webhook + Params（可选）
+// 断言的资源由调用方在 state 中提供
 func (runner *ExpectationRunner) runExpectation(
     exp Expectation,
     state map[string]interface{},
 ) (ExpectationResult, error) {
-    // 模式1: Webhook
+    // 有 Webhook → 调用外部服务
     if exp.Webhook != "" {
         return runner.runWebhook(exp)
     }
 
-    // 模式2: 内置函数
-    var payload map[string]interface{}
-    if exp.Resource != nil {
-        // 显式指定资源
-        payload = SelectStateByResource(state, exp.Resource)
-    } else {
-        // 自动选择资源
-        payload = SelectStateForExpectation(state)
-    }
+    // 无 Webhook → 调用内置函数
+    payload := SelectStateForExpectation(state)
 
     return runner.runFunction(exp, payload)
 }
@@ -1109,16 +1060,20 @@ func RegisterBuiltins(r *Registry) {
 **步骤 3**: 在 YAML 中使用：
 
 ```yaml
-expectations:
-  allOf:
-    - function: MyCustomExpect
-      params:
-        expected: "ready"
-        threshold: 5
-      resource:
-        apiVersion: example.com/v1
-        kind: MyResource
-        name: my-instance
+# 在 IntegrationTest step 中使用（断言自动检查当前步骤的资源）
+steps:
+  - name: check-my-resource
+    selector:
+      apiVersion: example.com/v1
+      kind: MyResource
+      name: my-instance
+    expectations:
+      timeoutSeconds: 60
+      allOf:
+        - function: MyCustomExpect
+          params:
+            expected: "ready"
+            threshold: 5
 ```
 
 ---
@@ -1145,7 +1100,7 @@ expectations:
 | **收敛检查** | 检查 `observedGeneration >= generation`，确保 Controller 已处理最新 spec |
 | **重试机制** | 断言未通过时 Requeue (默认 3s)，直到超时 |
 | **超时控制** | WaitCondition 有 TimeoutSeconds，ExpectationPolicy 有 FailureThreshold |
-| **状态选择** | 支持显式指定 Resource，或自动选择（单资源展开，多资源优先有 status 的）|
+| **状态选择** | 自动选择目标资源（单资源展开，多资源优先有 status 的）|
 | **结果记录** | ExpectationResult 记录到 Status，便于调试和监控 |
 | **可扩展性** | 支持 Webhook 调用外部服务，实现自定义断言 |
 | **纯函数** | 期望函数只能读取 Snapshot，不能修改资源 |
