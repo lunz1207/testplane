@@ -106,35 +106,27 @@ func (r *IntegrationTestReconciler) handleDeletion(ctx context.Context, it *infr
 func (r *IntegrationTestReconciler) reconcileNormal(ctx context.Context, it *infrav1alpha1.IntegrationTest) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
-	status := it.Status.DeepCopy()
+	// 初始化状态（如需要）
+	if it.Status.Phase == "" {
+		return r.initializeTest(ctx, it)
+	}
 
-	r.initializeStatus(status)
+	log.Info("reconcile integrationtest", "phase", it.Status.Phase, "mode", it.Spec.Mode)
 
-	log.Info("reconcile integrationtest", "phase", status.Phase, "mode", it.Spec.Mode)
-
-	if isTerminalPhase(status.Phase) {
+	if isTerminalPhase(it.Status.Phase) {
 		return ctrl.Result{}, nil
 	}
 
 	// 检测运行中的 spec 变更并忽略
-	if r.detectAndIgnoreSpecChange(ctx, it, status) {
-		// spec 已变更但被忽略，继续执行原有逻辑
-		log.Info("spec changed while running, ignoring", "observedGeneration", status.ObservedGeneration, "currentGeneration", it.Generation)
-	} else if status.ObservedGeneration == 0 {
-		// 首次执行，锁定 Generation
-		status.ObservedGeneration = it.Generation
+	if r.detectAndIgnoreSpecChange(ctx, it) {
+		log.Info("spec changed while running, ignoring", "observedGeneration", it.Status.ObservedGeneration, "currentGeneration", it.Generation)
+		if err := r.patchStatus(ctx, it, it.Status); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
-	// 执行测试逻辑（子函数只修改 status，不负责持久化）
-	result, err := r.executeTest(ctx, it, status)
-
-	// 统一在顶层持久化状态
-	if patchErr := r.patchStatus(ctx, it, *status); patchErr != nil {
-		log.Error(patchErr, "failed to patch status")
-		return ctrl.Result{RequeueAfter: defaultRequeue}, nil
-	}
-
-	return result, err
+	// 执行测试逻辑（子函数负责各自的状态持久化）
+	return r.executeTest(ctx, it)
 }
 
 // SetupWithManager wires the controller.

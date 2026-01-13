@@ -14,40 +14,38 @@ import (
 )
 
 // executeTest 执行测试逻辑，根据模式选择顺序或并行执行。
-func (r *IntegrationTestReconciler) executeTest(ctx context.Context, tc *infrav1alpha1.IntegrationTest, status *infrav1alpha1.IntegrationTestStatus) (ctrl.Result, error) {
-	if isTerminalPhase(status.Phase) {
+// 采用分散 patch 模式：在发送 Event 之前先 patch 状态。
+func (r *IntegrationTestReconciler) executeTest(ctx context.Context, it *infrav1alpha1.IntegrationTest) (ctrl.Result, error) {
+	if isTerminalPhase(it.Status.Phase) {
 		return ctrl.Result{}, nil
 	}
 
 	// Pending → Running：初始化并开始测试
-	if status.Phase == infrav1alpha1.IntegrationTestPhasePending {
-		status.Phase = infrav1alpha1.IntegrationTestPhaseRunning
-		r.initRepeatStatus(status)
-		framework.EmitNormalEvent(r.Recorder, tc, EventReasonIntegrationTestStarted, fmt.Sprintf("开始执行测试用例，模式: %s, 轮数: %s", tc.Spec.Mode, formatTotalRounds(tc)))
+	if it.Status.Phase == infrav1alpha1.IntegrationTestPhasePending {
+		it.Status.Phase = infrav1alpha1.IntegrationTestPhaseRunning
+		r.initRepeatStatus(&it.Status)
+		// 先 patch，成功后再发 Event
+		if err := r.patchStatus(ctx, it, it.Status); err != nil {
+			return ctrl.Result{}, err
+		}
+		framework.EmitNormalEvent(r.Recorder, it, EventReasonIntegrationTestStarted, fmt.Sprintf("开始执行测试用例，模式: %s, 轮数: %s", it.Spec.Mode, formatTotalRounds(it)))
 	}
 
 	// 检查是否达到停止条件
-	if r.shouldStopRepeat(tc, status) {
-		return r.finishTest(ctx, tc, status)
+	if r.shouldStopRepeat(it, &it.Status) {
+		return r.finishTest(ctx, it)
 	}
 
-	var result ctrl.Result
-	var err error
-
 	// 从 spec 获取 mode
-	mode := tc.Spec.Mode
+	mode := it.Spec.Mode
 	if mode == "" {
 		mode = infrav1alpha1.IntegrationTestModeSequential
 	}
 
 	if mode == infrav1alpha1.IntegrationTestModeSequential {
-		result, err = r.executeSequential(ctx, tc, status)
-	} else {
-		result, err = r.executeParallel(ctx, tc, status)
+		return r.executeSequential(ctx, it)
 	}
-
-	// 注意：status 持久化已移至顶层 reconcileNormal() 统一处理
-	return result, err
+	return r.executeParallel(ctx, it)
 }
 
 // initRepeatStatus 初始化重复执行状态。
@@ -93,38 +91,43 @@ func (r *IntegrationTestReconciler) shouldStopRepeat(tc *infrav1alpha1.Integrati
 }
 
 // startNextRound 开始下一轮执行。
-func (r *IntegrationTestReconciler) startNextRound(ctx context.Context, tc *infrav1alpha1.IntegrationTest, status *infrav1alpha1.IntegrationTestStatus) (ctrl.Result, error) {
+func (r *IntegrationTestReconciler) startNextRound(ctx context.Context, it *infrav1alpha1.IntegrationTest) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	// 避免重复增加 CompletedRounds（轮间延迟返回后会再次进入此函数）
-	if len(status.Steps) > 0 {
+	if len(it.Status.Steps) > 0 {
 		// 保存当前轮次摘要到历史
-		saveRoundSummary(status)
+		saveRoundSummary(&it.Status)
 
-		status.CompletedRounds++
-		log.Info("round completed", "round", status.CurrentRound, "completedRounds", status.CompletedRounds)
+		it.Status.CompletedRounds++
+		log.Info("round completed", "round", it.Status.CurrentRound, "completedRounds", it.Status.CompletedRounds)
 
 		// 重置步骤索引（准备下一轮或结束）
 		zero := 0
-		status.CurrentStepIndex = &zero
+		it.Status.CurrentStepIndex = &zero
 	}
 
 	// 检查是否应该停止
-	if r.shouldStopRepeat(tc, status) {
-		return r.finishTest(ctx, tc, status)
+	if r.shouldStopRepeat(it, &it.Status) {
+		return r.finishTest(ctx, it)
 	}
 
 	// 继续下一轮，递增轮数并重置 Steps 状态
-	status.CurrentRound++
-	status.Steps = nil
+	it.Status.CurrentRound++
+	it.Status.Steps = nil
 
-	// 轮间延迟
-	if tc.Spec.Repeat != nil && tc.Spec.Repeat.DelayBetweenRounds > 0 {
-		log.Info("delay between rounds", "seconds", tc.Spec.Repeat.DelayBetweenRounds)
-		return ctrl.Result{RequeueAfter: time.Duration(tc.Spec.Repeat.DelayBetweenRounds) * time.Second}, nil
+	// patch 状态
+	if err := r.patchStatus(ctx, it, it.Status); err != nil {
+		return ctrl.Result{}, err
 	}
 
-	log.Info("starting next round", "round", status.CurrentRound)
+	// 轮间延迟
+	if it.Spec.Repeat != nil && it.Spec.Repeat.DelayBetweenRounds > 0 {
+		log.Info("delay between rounds", "seconds", it.Spec.Repeat.DelayBetweenRounds)
+		return ctrl.Result{RequeueAfter: time.Duration(it.Spec.Repeat.DelayBetweenRounds) * time.Second}, nil
+	}
+
+	log.Info("starting next round", "round", it.Status.CurrentRound)
 	return ctrl.Result{Requeue: true}, nil
 }
 
