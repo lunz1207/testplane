@@ -141,6 +141,9 @@ func (r *LoadTestReconciler) checkReadyCondition(
 // annotationTargetSpecHash 用于存储 target spec hash 的 annotation key。
 const annotationTargetSpecHash = "infra.testplane.io/target-spec-hash"
 
+// annotationSelectorResolved 用于标记 selector target 已解析的 annotation key。
+const annotationSelectorResolved = "infra.testplane.io/selector-resolved"
+
 // applyAndResolveTarget 应用并解析 target 资源。
 // 使用 annotation 存储 hash 避免重复 apply，防止与其他 controller 的 SSA 冲突。
 func (r *LoadTestReconciler) applyAndResolveTarget(ctx context.Context, lt *infrav1alpha1.LoadTest) (*unstructured.Unstructured, error) {
@@ -158,6 +161,7 @@ func (r *LoadTestReconciler) applyAndResolveTarget(ctx context.Context, lt *infr
 		savedHash := lt.GetAnnotations()[annotationTargetSpecHash]
 
 		// 只在 hash 变化时 apply，避免重复 apply 导致 SSA 冲突
+		needEmitEvent := false
 		if currentHash != savedHash {
 			log.Info("target template changed, applying resource", "oldHash", savedHash, "newHash", currentHash)
 			if err := r.ResourceManager.ApplyObject(ctx, lt, manifest.Object); err != nil {
@@ -168,6 +172,7 @@ func (r *LoadTestReconciler) applyAndResolveTarget(ctx context.Context, lt *infr
 			if err := r.updateTargetSpecHashAnnotation(ctx, lt, currentHash); err != nil {
 				return nil, err
 			}
+			needEmitEvent = true
 		} else {
 			log.V(1).Info("target template unchanged, skipping apply", "hash", currentHash)
 		}
@@ -179,8 +184,11 @@ func (r *LoadTestReconciler) applyAndResolveTarget(ctx context.Context, lt *infr
 			return nil, err
 		}
 
-		framework.EmitNormalEvent(r.Recorder, lt, EventReasonTargetApplied,
-			fmt.Sprintf("Target %s/%s resolved", target.GetKind(), target.GetName()))
+		// 只在实际 apply 时发送事件，避免重复
+		if needEmitEvent {
+			framework.EmitNormalEvent(r.Recorder, lt, EventReasonTargetApplied,
+				fmt.Sprintf("Target %s/%s resolved", target.GetKind(), target.GetName()))
+		}
 		return target, nil
 	}
 
@@ -192,8 +200,14 @@ func (r *LoadTestReconciler) applyAndResolveTarget(ctx context.Context, lt *infr
 			return nil, err
 		}
 
-		framework.EmitNormalEvent(r.Recorder, lt, EventReasonTargetApplied,
-			fmt.Sprintf("Target %s/%s resolved", target.GetKind(), target.GetName()))
+		// 检查是否已解析过，避免重复发送事件
+		if lt.GetAnnotations()[annotationSelectorResolved] != "true" {
+			if err := r.markSelectorResolved(ctx, lt); err != nil {
+				return nil, err
+			}
+			framework.EmitNormalEvent(r.Recorder, lt, EventReasonTargetApplied,
+				fmt.Sprintf("Target %s/%s resolved", target.GetKind(), target.GetName()))
+		}
 		return target, nil
 	}
 
@@ -214,6 +228,23 @@ func (r *LoadTestReconciler) updateTargetSpecHashAnnotation(ctx context.Context,
 
 	if err := r.Patch(ctx, lt, patch); err != nil {
 		return fmt.Errorf("patch target spec hash annotation: %w", err)
+	}
+	return nil
+}
+
+// markSelectorResolved 标记 selector target 已解析。
+func (r *LoadTestReconciler) markSelectorResolved(ctx context.Context, lt *infrav1alpha1.LoadTest) error {
+	patch := client.MergeFrom(lt.DeepCopy())
+
+	annotations := lt.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations[annotationSelectorResolved] = "true"
+	lt.SetAnnotations(annotations)
+
+	if err := r.Patch(ctx, lt, patch); err != nil {
+		return fmt.Errorf("patch selector resolved annotation: %w", err)
 	}
 	return nil
 }
