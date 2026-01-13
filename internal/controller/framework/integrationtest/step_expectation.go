@@ -14,8 +14,7 @@ import (
 	"github.com/lunz1207/testplane/internal/controller/framework/resource"
 )
 
-// 注意：本文件中的函数采用分散 patch 模式
-// 在发送 Event 之前先 patch 状态，避免 Event 重复
+// 注意：发送 Event 前先用 APIReader 检查 API Server 最新状态，避免缓存延迟导致重复事件
 
 // stepExpectationOutcome 步骤期望检查结果。
 type stepExpectationOutcome int
@@ -30,15 +29,6 @@ const (
 // 返回 outcome 和是否需要发送 Event（调用方负责 patch 和发送 Event）。
 func (r *IntegrationTestReconciler) checkStepExpectationsCore(ctx context.Context, it *infrav1alpha1.IntegrationTest, stepStatus *infrav1alpha1.StepStatus, step infrav1alpha1.TestStep, manifests []resource.ExpandedManifest) (stepExpectationOutcome, string) {
 	log := logf.FromContext(ctx)
-
-	// 幂等性检查：如果步骤已完成（FinishedAt 已设置），直接返回不发送事件
-	// 使用 FinishedAt 判断比 State 更可靠，可防止缓存部分更新导致的重复事件
-	if stepStatus.FinishedAt != nil && !stepStatus.FinishedAt.IsZero() {
-		if stepStatus.State == framework.StateSucceeded {
-			return outcomeSucceeded, ""
-		}
-		return outcomeFailed, ""
-	}
 
 	selectors := selectorsFromStep(step)
 	allExpectations := expectationsFromWaitCondition(step.Expectations)
@@ -88,7 +78,6 @@ func (r *IntegrationTestReconciler) checkStepExpectationsCore(ctx context.Contex
 }
 
 // checkParallelStepExpectations 检查并行步骤的期望，返回是否通过。
-// 采用分散 patch 模式：在发送 Event 之前先 patch 状态。
 func (r *IntegrationTestReconciler) checkParallelStepExpectations(ctx context.Context, it *infrav1alpha1.IntegrationTest, stepStatus *infrav1alpha1.StepStatus, step infrav1alpha1.TestStep, manifests []resource.ExpandedManifest) (ctrl.Result, bool) {
 	_ = logf.FromContext(ctx)
 
@@ -105,7 +94,9 @@ func (r *IntegrationTestReconciler) checkParallelStepExpectations(ctx context.Co
 	case outcomeWaiting:
 		return ctrl.Result{RequeueAfter: defaultRequeue}, false
 	case outcomeFailed:
-		// 先 patch，成功后再发 Event
+		if r.stepAlreadyFinished(ctx, it, stepStatus.Index) {
+			return ctrl.Result{}, false
+		}
 		if err := r.patchStatus(ctx, it, it.Status); err != nil {
 			return ctrl.Result{}, false
 		}
@@ -114,7 +105,9 @@ func (r *IntegrationTestReconciler) checkParallelStepExpectations(ctx context.Co
 		}
 		return ctrl.Result{}, false
 	default: // outcomeSucceeded
-		// 先 patch，成功后再发 Event
+		if r.stepAlreadyFinished(ctx, it, stepStatus.Index) {
+			return ctrl.Result{}, true
+		}
 		if err := r.patchStatus(ctx, it, it.Status); err != nil {
 			return ctrl.Result{}, false
 		}
@@ -126,14 +119,16 @@ func (r *IntegrationTestReconciler) checkParallelStepExpectations(ctx context.Co
 }
 
 // checkStepExpectations 检查步骤的期望。
-// 采用分散 patch 模式：在发送 Event 之前先 patch 状态。
 func (r *IntegrationTestReconciler) checkStepExpectations(ctx context.Context, it *infrav1alpha1.IntegrationTest, stepStatus *infrav1alpha1.StepStatus, step infrav1alpha1.TestStep, manifests []resource.ExpandedManifest) (ctrl.Result, error) {
 	outcome, eventMsg := r.checkStepExpectationsCore(ctx, it, stepStatus, step, manifests)
 	switch outcome {
 	case outcomeWaiting:
 		return ctrl.Result{RequeueAfter: defaultRequeue}, nil
 	case outcomeFailed:
-		// 先 patch，成功后再发 Event
+		// patch 前检查 API Server 最新状态，避免重复事件
+		if r.stepAlreadyFinished(ctx, it, stepStatus.Index) {
+			return r.handleStepFailure(ctx, it)
+		}
 		if err := r.patchStatus(ctx, it, it.Status); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -142,7 +137,10 @@ func (r *IntegrationTestReconciler) checkStepExpectations(ctx context.Context, i
 		}
 		return r.handleStepFailure(ctx, it)
 	default: // outcomeSucceeded
-		// 先 patch，成功后再发 Event
+		// patch 前检查 API Server 最新状态，避免重复事件
+		if r.stepAlreadyFinished(ctx, it, stepStatus.Index) {
+			return ctrl.Result{Requeue: true}, nil
+		}
 		if err := r.patchStatus(ctx, it, it.Status); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -154,7 +152,6 @@ func (r *IntegrationTestReconciler) checkStepExpectations(ctx context.Context, i
 }
 
 // checkStepReadyCondition 检查步骤级 ReadyCondition。
-// 采用分散 patch 模式：在发送 Event 之前先 patch 状态。
 func (r *IntegrationTestReconciler) checkStepReadyCondition(ctx context.Context, it *infrav1alpha1.IntegrationTest, stepStatus *infrav1alpha1.StepStatus, step infrav1alpha1.TestStep, manifests []resource.ExpandedManifest) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 

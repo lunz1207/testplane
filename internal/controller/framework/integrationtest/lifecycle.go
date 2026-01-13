@@ -10,8 +10,7 @@ import (
 	"github.com/lunz1207/testplane/internal/controller/framework"
 )
 
-// 注意：本文件中的函数采用分散 patch 模式
-// 在发送 Event 之前先 patch 状态，避免 Event 重复
+// 注意：发送 Event 前先用 APIReader 检查 API Server 最新状态，避免缓存延迟导致重复事件
 
 // lifecycle.go 包含 IntegrationTest 资源的生命周期管理和状态设置函数
 
@@ -65,15 +64,12 @@ func setSucceeded(status *infrav1alpha1.IntegrationTestStatus) {
 
 // finishTest 完成测试，根据当前状态设置最终结果。
 // 先 patch 状态，成功后再发送 Event。
-// 注意：使用 isTerminalPhase 和 CompletionTime 双重检查确保幂等性。
 func (r *IntegrationTestReconciler) finishTest(ctx context.Context, it *infrav1alpha1.IntegrationTest) (ctrl.Result, error) {
-	// 幂等性检查：如果已经是终态或 CompletionTime 已设置，直接返回
-	// 使用双重检查防止缓存部分更新导致的重复事件
-	if isTerminalPhase(it.Status.Phase) || it.Status.CompletionTime != nil {
+	// 检查 API Server 最新状态，避免重复事件
+	if r.testAlreadyCompleted(ctx, it) {
 		return ctrl.Result{}, nil
 	}
 
-	// 成功情况（Phase 还不是终态）
 	setSucceeded(&it.Status)
 	if err := r.patchStatus(ctx, it, it.Status); err != nil {
 		return ctrl.Result{}, err
