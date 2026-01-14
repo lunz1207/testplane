@@ -5,12 +5,14 @@ import (
 	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	infrav1alpha1 "github.com/lunz1207/testplane/api/v1alpha1"
 	"github.com/lunz1207/testplane/internal/controller/framework"
 	"github.com/lunz1207/testplane/internal/controller/framework/resource"
+	"github.com/lunz1207/testplane/internal/controller/framework/watch"
 )
 
 // 注意：发送 Event 前先用 APIReader 检查 API Server 最新状态，避免缓存延迟导致重复事件
@@ -59,6 +61,15 @@ func (r *IntegrationTestReconciler) executeSequential(ctx context.Context, it *i
 			return r.handleStepFailure(ctx, it)
 		}
 		stepStatus.State = framework.StateRunning
+
+		// 启动 watch，资源变化时触发 reconcile
+		if r.WatchManager != nil {
+			targets := r.buildWatchTargets(step, resourceSpecs)
+			if err := r.WatchManager.StartWatch(ctx, it.Namespace, it.Name, targets); err != nil {
+				log.Error(err, "failed to start watch, falling back to polling")
+			}
+		}
+
 		// 先 patch，成功后再发 Event
 		if err := r.patchStatus(ctx, it, it.Status); err != nil {
 			return ctrl.Result{}, err
@@ -70,6 +81,7 @@ func (r *IntegrationTestReconciler) executeSequential(ctx context.Context, it *i
 	// 2. 等待资源收敛
 	if err := r.waitResourcesConverge(ctx, resourceSpecs); err != nil {
 		log.Info("waiting for convergence", "step", step.Name)
+		// 收敛等待使用短超时，因为这是资源创建阶段
 		return ctrl.Result{RequeueAfter: defaultRequeue}, nil
 	}
 
@@ -138,6 +150,15 @@ func (r *IntegrationTestReconciler) executeParallel(ctx context.Context, it *inf
 				return r.handleStepFailure(ctx, it)
 			}
 			stepStatus.State = framework.StateRunning
+
+			// 启动 watch，资源变化时触发 reconcile
+			if r.WatchManager != nil {
+				targets := r.buildWatchTargets(step, stepResourceSpecs[i])
+				if err := r.WatchManager.StartWatch(ctx, it.Namespace, it.Name, targets); err != nil {
+					log.Error(err, "failed to start watch, falling back to polling")
+				}
+			}
+
 			// 先 patch，成功后再发 Event
 			if err := r.patchStatus(ctx, it, it.Status); err != nil {
 				return ctrl.Result{}, err
@@ -193,7 +214,12 @@ func (r *IntegrationTestReconciler) executeParallel(ctx context.Context, it *inf
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	return ctrl.Result{RequeueAfter: defaultRequeue}, nil
+	// 如果 watch 已启用，使用较长的兜底超时
+	requeue := defaultRequeue
+	if r.WatchManager != nil && r.WatchManager.IsWatching(it.Namespace, it.Name) {
+		requeue = watchFallbackRequeue
+	}
+	return ctrl.Result{RequeueAfter: requeue}, nil
 }
 
 // handleStepFailure 处理步骤失败，检查是否应该停止。
@@ -228,4 +254,40 @@ func (r *IntegrationTestReconciler) allStepsSucceeded(status *infrav1alpha1.Inte
 		}
 	}
 	return true
+}
+
+// buildWatchTargets 从 step 构建 watch 目标列表。
+func (r *IntegrationTestReconciler) buildWatchTargets(step infrav1alpha1.TestStep, manifests []resource.ExpandedManifest) []watch.WatchTarget {
+	// Pre-allocate with estimated capacity
+	capacity := len(manifests)
+	if step.Selector != nil {
+		capacity++
+	}
+	targets := make([]watch.WatchTarget, 0, capacity)
+
+	// 从 template 资源获取
+	for _, m := range manifests {
+		obj := m.Object
+		gvk := obj.GroupVersionKind()
+		targets = append(targets, watch.WatchTarget{
+			GVK:       gvk,
+			Namespace: obj.GetNamespace(),
+			Name:      obj.GetName(),
+		})
+	}
+
+	// 从 selector 获取
+	if step.Selector != nil {
+		gv, err := schema.ParseGroupVersion(step.Selector.APIVersion)
+		if err == nil {
+			gvk := gv.WithKind(step.Selector.Kind)
+			targets = append(targets, watch.WatchTarget{
+				GVK:       gvk,
+				Namespace: step.Selector.Namespace,
+				Name:      step.Selector.Name,
+			})
+		}
+	}
+
+	return targets
 }

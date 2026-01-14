@@ -31,6 +31,7 @@ import (
 	"github.com/lunz1207/testplane/internal/controller/framework"
 	"github.com/lunz1207/testplane/internal/controller/framework/plugin"
 	"github.com/lunz1207/testplane/internal/controller/framework/resource"
+	"github.com/lunz1207/testplane/internal/controller/framework/watch"
 )
 
 const (
@@ -39,6 +40,9 @@ const (
 
 	defaultStepTimeout = 10 * time.Minute
 	defaultRequeue     = 5 * time.Second
+	// watchFallbackRequeue 是 watch 模式下的兜底 requeue 时间。
+	// 正常情况下 watch 会触发 reconcile，这个只是作为保险。
+	watchFallbackRequeue = 30 * time.Second
 )
 
 // IntegrationTestReconciler reconciles an IntegrationTest object.
@@ -46,9 +50,10 @@ type IntegrationTestReconciler struct {
 	client.Client
 	Scheme          *runtime.Scheme
 	PluginRegistry  *plugin.Registry
-	APIReader       client.Reader        // 用于 waitResourcesConverge 绕过缓存检查收敛状态
-	Recorder        record.EventRecorder // 事件记录器
-	ResourceManager *resource.Manager    // 资源管理器
+	APIReader       client.Reader              // 用于 waitResourcesConverge 绕过缓存检查收敛状态
+	Recorder        record.EventRecorder       // 事件记录器
+	ResourceManager *resource.Manager          // 资源管理器
+	WatchManager    *watch.DynamicWatchManager // 动态 watch 管理器
 }
 
 // +kubebuilder:rbac:groups=infra.testplane.io,resources=integrationtests,verbs=get;list;watch;create;update;patch;delete
@@ -93,6 +98,11 @@ func (r *IntegrationTestReconciler) handleDeletion(ctx context.Context, it *infr
 		return ctrl.Result{}, nil
 	}
 
+	// 停止 watch
+	if r.WatchManager != nil {
+		r.WatchManager.StopWatch(it.Namespace, it.Name)
+	}
+
 	// 移除 finalizer，资源通过 ownerRef 由 GC 自动清理
 	controllerutil.RemoveFinalizer(it, integrationTestFinalizer)
 	if err := r.Update(ctx, it); err != nil {
@@ -134,8 +144,14 @@ func (r *IntegrationTestReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Recorder == nil {
 		r.Recorder = mgr.GetEventRecorderFor("integrationtest")
 	}
+
+	// Initialize WatchManager
+	r.WatchManager = watch.NewDynamicWatchManager(mgr.GetCache(), mgr.GetClient())
+
+	// Build controller with the WatchManager's event source
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&infrav1alpha1.IntegrationTest{}).
+		WatchesRawSource(r.WatchManager.EventSource()).
 		Named("integrationtest").
 		Complete(r)
 }

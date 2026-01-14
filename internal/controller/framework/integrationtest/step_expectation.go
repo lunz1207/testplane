@@ -92,7 +92,12 @@ func (r *IntegrationTestReconciler) checkParallelStepExpectations(ctx context.Co
 	outcome, eventMsg := r.checkStepExpectationsCore(ctx, it, stepStatus, step, manifests)
 	switch outcome {
 	case outcomeWaiting:
-		return ctrl.Result{RequeueAfter: defaultRequeue}, false
+		// 如果 watch 已启用，使用较长的兜底超时
+		requeue := defaultRequeue
+		if r.WatchManager != nil && r.WatchManager.IsWatching(it.Namespace, it.Name) {
+			requeue = watchFallbackRequeue
+		}
+		return ctrl.Result{RequeueAfter: requeue}, false
 	case outcomeFailed:
 		if r.stepAlreadyFinished(ctx, it, stepStatus.Index) {
 			return ctrl.Result{}, false
@@ -123,7 +128,13 @@ func (r *IntegrationTestReconciler) checkStepExpectations(ctx context.Context, i
 	outcome, eventMsg := r.checkStepExpectationsCore(ctx, it, stepStatus, step, manifests)
 	switch outcome {
 	case outcomeWaiting:
-		return ctrl.Result{RequeueAfter: defaultRequeue}, nil
+		// 如果 watch 已启用，使用较长的兜底超时（watch 会触发 reconcile）
+		// 否则使用默认的短轮询间隔
+		requeue := defaultRequeue
+		if r.WatchManager != nil && r.WatchManager.IsWatching(it.Namespace, it.Name) {
+			requeue = watchFallbackRequeue
+		}
+		return ctrl.Result{RequeueAfter: requeue}, nil
 	case outcomeFailed:
 		// patch 前检查 API Server 最新状态，避免重复事件
 		if r.stepAlreadyFinished(ctx, it, stepStatus.Index) {
