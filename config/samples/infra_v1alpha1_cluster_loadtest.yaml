@@ -6,43 +6,45 @@ metadata:
 spec:
   target:
     # 方式1：使用 selector 引用已有资源（只读）
-    # selector:
-    #   apiVersion: infra.qingcloud.test/v1alpha1
-    #   kind: Cluster
-    #   name: cluster-sample
-    #   # 或通过 label 选择
-    #   # labelSelector:
-    #   #   app.kubernetes.io/name: testplane
-    #   # 或通过 annotation 选择
-    #   # annotationSelector:
-    #   #   infra.testplane.io/cluster-id: cl-aeuj19ce
+    # resource:
+    #   selector:
+    #     apiVersion: infra.qingcloud.test/v1alpha1
+    #     kind: Cluster
+    #     name: cluster-sample
+    #     # 或通过 label 选择
+    #     # labelSelector:
+    #     #   app.kubernetes.io/name: testplane
+    #     # 或通过 annotation 选择
+    #     # annotationSelector:
+    #     #   infra.testplane.io/cluster-id: cl-aeuj19ce
 
-    # 方式2：使用 template 创建/更新资源
-    template:
-      apiVersion: infra.qingcloud.test/v1alpha1
-      kind: Cluster
-      metadata:
-        name: cluster-loadtest-sample
-      spec:
-        owner: "usr-hRAmdSn6"
-        zone: "pek3b"
-        appVersionRef:
-          name: mysql-plus-1.5.0
-        users:
-          - user: ubuntu
-            database: "*"
-            host: "%"
-            password: Zhu88jie@
-            ssl: "NO"
-            privilege: SuperuserAccount
-            expireTime: 0
-            role: maininstance
-        confOverrides:
-          cluster:
-            vpc_router_id: rtr-qk0rurp3
-            vxnet: vxnet-0hqwk3e
-            maininstance:
-              count: 2
+    # 方式2：使用 manifest 创建/更新资源
+    resource:
+      manifest:
+        apiVersion: infra.qingcloud.test/v1alpha1
+        kind: Cluster
+        metadata:
+          name: cluster-loadtest-sample
+        spec:
+          owner: "usr-hRAmdSn6"
+          zone: "pek3b"
+          appVersionRef:
+            name: mysql-plus-1.5.0
+          users:
+            - user: ubuntu
+              database: "*"
+              host: "%"
+              password: Zhu88jie@
+              ssl: "NO"
+              privilege: SuperuserAccount
+              expireTime: 0
+              role: maininstance
+          confOverrides:
+            cluster:
+              vpc_router_id: rtr-qk0rurp3
+              vxnet: vxnet-0hqwk3e
+              maininstance:
+                count: 2
     readyCondition:
       timeoutSeconds: 1200
       allOf:
@@ -56,36 +58,35 @@ spec:
           params:
             role: Master
     resources:
-      templates:
-        - template:
-            apiVersion: apps/v1
-            kind: Deployment
-            metadata:
-              name: loadtest-workload-sample
-            spec:
-              replicas: 1
-              selector:
-                matchLabels:
+      - manifest:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: loadtest-workload-sample
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: loadtest-workload-sample
+            template:
+              metadata:
+                labels:
                   app: loadtest-workload-sample
-              template:
-                metadata:
-                  labels:
-                    app: loadtest-workload-sample
-                spec:
-                  restartPolicy: Always
-                  containers:
-                    - name: task
-                      image: no8ge/qtm:v1.0.5
-                      args:
-                        - /bin/sh
-                        - -c
-                        - ./qtm db mysql run -b 10 -c 10 -d 30m --interval 1s -H ${MYSQL_MASTER_URL} --loglevel debug
-                      env:
-                        - name: MYSQL_MASTER_URL
-                          value: "${MYSQL_MASTER_URL}"
-                      imagePullPolicy: Always
+              spec:
+                restartPolicy: Always
+                containers:
+                  - name: task
+                    image: no8ge/qtm:v1.0.5
+                    args:
+                      - /bin/sh
+                      - -c
+                      - ./qtm db mysql run -b 10 -c 10 -d 30m --interval 1s -H ${MYSQL_MASTER_URL} --loglevel debug
+                    env:
+                      - name: MYSQL_MASTER_URL
+                        value: "${MYSQL_MASTER_URL}"
+                    imagePullPolicy: Always
 
-  expectations:
+  healthCheck:
     failureThreshold: 3
     intervalSeconds: 30
     allOf:

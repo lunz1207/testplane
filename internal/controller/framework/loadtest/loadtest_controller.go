@@ -123,7 +123,7 @@ func (r *LoadTestReconciler) handleSpecChange(ctx context.Context, lt *infrav1al
 
 	// 1. 重新应用 target 资源（如有模板）
 	// applyAndResolveTarget 内部会通过 hash 检查避免重复 apply
-	if lt.Spec.Target.Template != nil {
+	if len(lt.Spec.Target.Resource.Manifest.Raw) > 0 {
 		if _, err := r.applyAndResolveTarget(ctx, lt); err != nil {
 			log.Error(err, "failed to apply target")
 			return r.setFailed(ctx, lt, "TargetApplyFailed", err.Error())

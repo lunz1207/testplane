@@ -28,7 +28,7 @@ import (
 func (r *LoadTestReconciler) applyWorkload(ctx context.Context, lt *infrav1alpha1.LoadTest) error {
 	log := logf.FromContext(ctx)
 
-	specs, err := r.expandResources(lt, &lt.Spec.Workload.Resources, lt.Status.InjectedValues)
+	specs, err := r.expandResources(lt, lt.Spec.Workload.Resources, lt.Status.InjectedValues)
 	if err != nil {
 		return fmt.Errorf("expand workload resources: %w", err)
 	}

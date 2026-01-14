@@ -47,9 +47,9 @@ func (r *LoadTestReconciler) transitionToRunning(ctx context.Context, lt *infrav
 		return r.setFailed(ctx, lt, "WorkloadApplyFailed", err.Error())
 	}
 
-	// 初始化断言检查状态
-	if lt.Spec.Expectations != nil {
-		lt.Status.ExpectationsStatus = &infrav1alpha1.ExpectationsStatus{}
+	// 初始化健康检查状态
+	if lt.Spec.HealthCheck != nil {
+		lt.Status.HealthCheckStatus = &infrav1alpha1.HealthCheckStatus{}
 	}
 
 	lt.Status.Phase = infrav1alpha1.LoadTestRunning
@@ -100,19 +100,19 @@ func (r *LoadTestReconciler) resolveAndUpdateEnvInjection(ctx context.Context, l
 }
 
 // reconcileRunning 处理 Running 阶段。
-// 根据 expectations 的 failureThreshold 判断是否失败。
+// 根据 healthCheck 的 failureThreshold 判断是否失败。
 func (r *LoadTestReconciler) reconcileRunning(ctx context.Context, lt *infrav1alpha1.LoadTest) (ctrl.Result, error) {
-	// 执行断言检查
-	if lt.Spec.Expectations != nil {
-		return r.runExpectationsChecks(ctx, lt)
+	// 执行健康检查
+	if lt.Spec.HealthCheck != nil {
+		return r.runHealthChecks(ctx, lt)
 	}
 
-	// 无断言检查，继续等待
+	// 无健康检查，继续等待
 	return ctrl.Result{RequeueAfter: defaultRequeue}, nil
 }
 
-// runExpectationsChecks 执行断言检查。
-func (r *LoadTestReconciler) runExpectationsChecks(ctx context.Context, lt *infrav1alpha1.LoadTest) (ctrl.Result, error) {
+// runHealthChecks 执行健康检查。
+func (r *LoadTestReconciler) runHealthChecks(ctx context.Context, lt *infrav1alpha1.LoadTest) (ctrl.Result, error) {
 	interval, status := r.getCheckIntervalAndStatus(lt)
 
 	// 检查是否需要等待
@@ -120,41 +120,41 @@ func (r *LoadTestReconciler) runExpectationsChecks(ctx context.Context, lt *infr
 		return ctrl.Result{RequeueAfter: remaining}, nil
 	}
 
-	return r.executeAndRecordExpectations(ctx, lt, status, interval)
+	return r.executeAndRecordHealthCheck(ctx, lt, status, interval)
 }
 
 // getCheckIntervalAndStatus 获取检查间隔并确保状态存在。
-func (r *LoadTestReconciler) getCheckIntervalAndStatus(lt *infrav1alpha1.LoadTest) (time.Duration, *infrav1alpha1.ExpectationsStatus) {
-	interval := getDurationOrDefault(lt.Spec.Expectations.IntervalSeconds, 10*time.Second)
+func (r *LoadTestReconciler) getCheckIntervalAndStatus(lt *infrav1alpha1.LoadTest) (time.Duration, *infrav1alpha1.HealthCheckStatus) {
+	interval := getDurationOrDefault(lt.Spec.HealthCheck.IntervalSeconds, 10*time.Second)
 
-	if lt.Status.ExpectationsStatus == nil {
-		lt.Status.ExpectationsStatus = &infrav1alpha1.ExpectationsStatus{}
+	if lt.Status.HealthCheckStatus == nil {
+		lt.Status.HealthCheckStatus = &infrav1alpha1.HealthCheckStatus{}
 	}
 
-	return interval, lt.Status.ExpectationsStatus
+	return interval, lt.Status.HealthCheckStatus
 }
 
 // shouldWaitForNextCheck 检查是否需要等待下一次检查。
-func (r *LoadTestReconciler) shouldWaitForNextCheck(status *infrav1alpha1.ExpectationsStatus, interval time.Duration) time.Duration {
+func (r *LoadTestReconciler) shouldWaitForNextCheck(status *infrav1alpha1.HealthCheckStatus, interval time.Duration) time.Duration {
 	if status.LastCheckTime != nil && time.Since(status.LastCheckTime.Time) < interval {
 		return interval - time.Since(status.LastCheckTime.Time)
 	}
 	return 0
 }
 
-// executeAndRecordExpectations 执行期望检查并记录结果。
+// executeAndRecordHealthCheck 执行健康检查并记录结果。
 // 采用分散 patch 模式：先 patch 状态，成功后再发送 Event。
-func (r *LoadTestReconciler) executeAndRecordExpectations(
+func (r *LoadTestReconciler) executeAndRecordHealthCheck(
 	ctx context.Context,
 	lt *infrav1alpha1.LoadTest,
-	status *infrav1alpha1.ExpectationsStatus,
+	status *infrav1alpha1.HealthCheckStatus,
 	interval time.Duration,
 ) (ctrl.Result, error) {
 	// 构建 state map，使用 target 资源
-	state := r.buildStateForExpectations(ctx, lt)
+	state := r.buildStateForHealthCheck(ctx, lt)
 
 	// 执行检查
-	results, allPassed := r.runExpectationsWithState(state, *lt.Spec.Expectations)
+	results, allPassed := r.runHealthCheckWithState(state, *lt.Spec.HealthCheck)
 
 	// 更新基础状态
 	now := metav1.Now()
@@ -166,11 +166,11 @@ func (r *LoadTestReconciler) executeAndRecordExpectations(
 	var eventMsg string
 	var eventType string
 	if allPassed {
-		eventMsg = r.handleExpectationPass(lt, status)
+		eventMsg = r.handleHealthCheckPass(lt, status)
 		eventType = "pass"
 	} else {
 		var shouldFail bool
-		eventMsg, shouldFail = r.handleExpectationFail(ctx, lt, status)
+		eventMsg, shouldFail = r.handleHealthCheckFail(ctx, lt, status)
 		eventType = "fail"
 		if shouldFail {
 			return ctrl.Result{}, nil
@@ -192,42 +192,42 @@ func (r *LoadTestReconciler) executeAndRecordExpectations(
 	return ctrl.Result{RequeueAfter: interval}, nil
 }
 
-// handleExpectationPass 处理期望检查通过的情况。
+// handleHealthCheckPass 处理健康检查通过的情况。
 // 只更新状态，返回 Event 消息（调用方负责 patch 后发送 Event）。
-func (r *LoadTestReconciler) handleExpectationPass(lt *infrav1alpha1.LoadTest, status *infrav1alpha1.ExpectationsStatus) string {
+func (r *LoadTestReconciler) handleHealthCheckPass(lt *infrav1alpha1.LoadTest, status *infrav1alpha1.HealthCheckStatus) string {
 	log := logf.FromContext(context.Background())
 
 	status.PassCount++
 	status.ConsecutiveFailures = 0
-	log.Info("expectations check passed", "checkCount", status.CheckCount)
+	log.Info("health check passed", "checkCount", status.CheckCount)
 
-	msg := fmt.Sprintf("Expectations check passed (pass: %d, fail: %d)", status.PassCount, status.FailCount)
+	msg := fmt.Sprintf("Health check passed (pass: %d, fail: %d)", status.PassCount, status.FailCount)
 
 	// 设置 ExpectationsMet Condition
-	setCondition(&lt.Status, ConditionTypeExpectationsMet, metav1.ConditionTrue, "ExpectationsPassed", msg, lt.Generation)
+	setCondition(&lt.Status, ConditionTypeExpectationsMet, metav1.ConditionTrue, "HealthCheckPassed", msg, lt.Generation)
 
 	return msg
 }
 
-// handleExpectationFail 处理期望检查失败的情况。
+// handleHealthCheckFail 处理健康检查失败的情况。
 // 只更新状态，返回 Event 消息和是否应该终止测试（调用方负责 patch 后发送 Event）。
-func (r *LoadTestReconciler) handleExpectationFail(ctx context.Context, lt *infrav1alpha1.LoadTest, status *infrav1alpha1.ExpectationsStatus) (string, bool) {
+func (r *LoadTestReconciler) handleHealthCheckFail(ctx context.Context, lt *infrav1alpha1.LoadTest, status *infrav1alpha1.HealthCheckStatus) (string, bool) {
 	log := logf.FromContext(ctx)
 
 	status.FailCount++
 	status.ConsecutiveFailures++
-	log.Info("expectations check failed", "consecutiveFailures", status.ConsecutiveFailures)
+	log.Info("health check failed", "consecutiveFailures", status.ConsecutiveFailures)
 
-	msg := fmt.Sprintf("Expectations check failed (consecutive failures: %d)", status.ConsecutiveFailures)
+	msg := fmt.Sprintf("Health check failed (consecutive failures: %d)", status.ConsecutiveFailures)
 
 	// 设置 ExpectationsMet Condition
-	setCondition(&lt.Status, ConditionTypeExpectationsMet, metav1.ConditionFalse, "ExpectationsFailed", msg, lt.Generation)
+	setCondition(&lt.Status, ConditionTypeExpectationsMet, metav1.ConditionFalse, "HealthCheckFailed", msg, lt.Generation)
 
 	// 检查是否达到失败阈值
-	threshold := getOrDefaultInt32(lt.Spec.Expectations.FailureThreshold, 3)
+	threshold := getOrDefaultInt32(lt.Spec.HealthCheck.FailureThreshold, 3)
 
 	if status.ConsecutiveFailures >= threshold {
-		_, _ = r.setFailed(ctx, lt, "ExpectationsFailed",
+		_, _ = r.setFailed(ctx, lt, "HealthCheckFailed",
 			fmt.Sprintf("consecutive failures reached threshold: %d", threshold))
 		return msg, true
 	}
@@ -235,9 +235,9 @@ func (r *LoadTestReconciler) handleExpectationFail(ctx context.Context, lt *infr
 	return msg, false
 }
 
-// buildStateForExpectations 为 expectations 构建 state map。
+// buildStateForHealthCheck 为健康检查构建 state map。
 // LoadTest 的断言对象固定为 Target 资源。
-func (r *LoadTestReconciler) buildStateForExpectations(
+func (r *LoadTestReconciler) buildStateForHealthCheck(
 	ctx context.Context,
 	lt *infrav1alpha1.LoadTest,
 ) map[string]interface{} {
@@ -248,10 +248,10 @@ func (r *LoadTestReconciler) buildStateForExpectations(
 	return buildStateFromTarget(target)
 }
 
-// runExpectationsWithState 使用预构建的 state 执行断言检查。
-func (r *LoadTestReconciler) runExpectationsWithState(state map[string]interface{}, expectations infrav1alpha1.WaitCondition) ([]infrav1alpha1.ExpectationResult, bool) {
+// runHealthCheckWithState 使用预构建的 state 执行健康检查。
+func (r *LoadTestReconciler) runHealthCheckWithState(state map[string]interface{}, healthCheck infrav1alpha1.HealthCheck) ([]infrav1alpha1.ExpectationResult, bool) {
 	runner := framework.NewExpectationRunner(r.PluginRegistry)
-	results, err := runner.RunWaitCondition(&expectations, state)
+	results, err := runner.RunHealthCheck(&healthCheck, state)
 
 	// LoadTest 不中断执行，即使出错也继续
 	if err != nil {
@@ -261,14 +261,14 @@ func (r *LoadTestReconciler) runExpectationsWithState(state map[string]interface
 	return results.All(), results.Passed()
 }
 
-// runWaitCondition 执行等待条件检查（用于 readyCondition）。
-func (r *LoadTestReconciler) runWaitCondition(target *unstructured.Unstructured, condition infrav1alpha1.WaitCondition) ([]infrav1alpha1.ExpectationResult, bool) {
+// runReadyCondition 执行等待条件检查（用于 readyCondition）。
+func (r *LoadTestReconciler) runReadyCondition(target *unstructured.Unstructured, condition infrav1alpha1.ReadyCondition) ([]infrav1alpha1.ExpectationResult, bool) {
 	// 构建 state map，key 格式: apiVersion/kind/name
 	// 这样 SelectStateByResource 可以正确匹配 expectation.resource
 	state := buildStateFromTarget(target)
 
 	runner := framework.NewExpectationRunner(r.PluginRegistry)
-	results, err := runner.RunWaitCondition(&condition, state)
+	results, err := runner.RunReadyCondition(&condition, state)
 
 	if err != nil {
 		return results.All(), false

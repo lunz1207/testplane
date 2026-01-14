@@ -14,7 +14,7 @@ spec:
   steps:
     - name: 创建集群
       timeoutSeconds: 600
-      template:
+      resource:
         manifest:
           apiVersion: infra.qingcloud.test/v1alpha1
           kind: Cluster
@@ -39,7 +39,7 @@ spec:
               expected: 2
 
     - name: 增加节点
-      template:
+      resource:
         manifest:
           apiVersion: infra.qingcloud.test/v1alpha1
           kind: Cluster
@@ -65,7 +65,7 @@ spec:
 
     - name: 升级集群
       timeoutSeconds: 1200
-      template:
+      resource:
         manifest:
           apiVersion: infra.qingcloud.test/v1alpha1
           kind: Cluster

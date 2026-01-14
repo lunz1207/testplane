@@ -14,7 +14,7 @@ spec:
   steps:
     - name: 创建 Deployment
       timeoutSeconds: 600
-      template:
+      resource:
         manifest:
           apiVersion: apps/v1
           kind: Deployment
@@ -41,7 +41,7 @@ spec:
           - function: ResourceExists
 
     - name: 扩容
-      template:
+      resource:
         manifest:
           apiVersion: apps/v1
           kind: Deployment
@@ -68,7 +68,7 @@ spec:
           - function: ResourceExists
 
     - name: 缩容
-      template:
+      resource:
         manifest:
           apiVersion: apps/v1
           kind: Deployment
@@ -95,7 +95,7 @@ spec:
           - function: ResourceExists
 
     - name: 增加标签
-      template:
+      resource:
         manifest:
           apiVersion: apps/v1
           kind: Deployment
@@ -125,7 +125,7 @@ spec:
           - function: ResourceExists
 
     - name: 删除标签
-      template:
+      resource:
         manifest:
           apiVersion: apps/v1
           kind: Deployment
@@ -152,7 +152,7 @@ spec:
           - function: ResourceExists
 
     - name: 删除 Deployment
-      template:
+      resource:
         manifest:
           apiVersion: apps/v1
           kind: Deployment

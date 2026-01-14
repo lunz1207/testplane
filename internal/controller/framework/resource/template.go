@@ -27,15 +27,30 @@ import (
 	infrav1alpha1 "github.com/lunz1207/testplane/api/v1alpha1"
 )
 
-// ExpandManifests 将 ManifestAction 列表展开为 ExpandedManifest 列表（支持 List/数组）。
-func ExpandManifests(manifests []infrav1alpha1.ManifestAction, defaultNamespace string) ([]ExpandedManifest, error) {
-	if len(manifests) == 0 {
+// ExpandResourceRef 展开单个 ResourceRef（支持 List/数组）。
+func ExpandResourceRef(ref infrav1alpha1.ResourceRef, defaultNamespace string) ([]ExpandedManifest, error) {
+	if len(ref.Manifest.Raw) == 0 {
+		return nil, fmt.Errorf("manifest is empty")
+	}
+
+	action := ref.Action
+	if action == "" {
+		action = infrav1alpha1.TemplateActionApply
+	}
+
+	return expandRaw(ref.Manifest.Raw, defaultNamespace, action)
+}
+
+// ExpandResourceRefs 展开多个 ResourceRef（支持 List/数组）。
+// replacements 用于对模板内容进行占位符替换（用于 workload 注入）。
+func ExpandResourceRefs(refs []infrav1alpha1.ResourceRef, defaultNamespace string, replacements map[string]string) ([]ExpandedManifest, error) {
+	if len(refs) == 0 {
 		return nil, nil
 	}
 
 	var result []ExpandedManifest
-	for _, m := range manifests {
-		expanded, err := ExpandManifest(m, defaultNamespace)
+	for _, ref := range refs {
+		expanded, err := ExpandResourceRefWithReplacements(ref, defaultNamespace, replacements)
 		if err != nil {
 			return nil, err
 		}
@@ -45,21 +60,26 @@ func ExpandManifests(manifests []infrav1alpha1.ManifestAction, defaultNamespace 
 	return result, nil
 }
 
-// ExpandManifest 展开单个 ManifestAction（支持 List/数组）。
-func ExpandManifest(m infrav1alpha1.ManifestAction, defaultNamespace string) ([]ExpandedManifest, error) {
-	if len(m.Manifest.Raw) == 0 {
+// ExpandResourceRefWithReplacements 展开单个 ResourceRef 并应用占位符替换。
+func ExpandResourceRefWithReplacements(ref infrav1alpha1.ResourceRef, defaultNamespace string, replacements map[string]string) ([]ExpandedManifest, error) {
+	if len(ref.Manifest.Raw) == 0 {
 		return nil, fmt.Errorf("manifest is empty")
 	}
 
-	action := m.Action
+	action := ref.Action
 	if action == "" {
 		action = infrav1alpha1.TemplateActionApply
 	}
 
-	return expandRaw(m.Manifest.Raw, defaultNamespace, action)
+	raw := ref.Manifest.Raw
+	if len(replacements) > 0 {
+		raw = ApplyReplacements(raw, replacements)
+	}
+
+	return expandRaw(raw, defaultNamespace, action)
 }
 
-// ExpandRawTemplate 展开单个 RawExtension 模板（供 LoadTest 使用）。
+// ExpandRawTemplate 展开单个 RawExtension 模板（供 LoadTest Target 使用）。
 func ExpandRawTemplate(template *runtime.RawExtension, defaultNamespace string) (*ExpandedManifest, error) {
 	if template == nil || len(template.Raw) == 0 {
 		return nil, fmt.Errorf("template is empty")
@@ -79,44 +99,6 @@ func ExpandRawTemplate(template *runtime.RawExtension, defaultNamespace string) 
 	}
 
 	return &results[0], nil
-}
-
-// ExpandTemplates 将 ResourcesSpec 的模板展开为 ExpandedManifest 列表（支持 List/数组）。
-// replacements 用于对模板内容进行占位符替换（用于 workload 注入）。
-func ExpandTemplates(resources *infrav1alpha1.ResourcesSpec, defaultNamespace string, replacements map[string]string) ([]ExpandedManifest, error) {
-	if resources == nil {
-		return nil, nil
-	}
-
-	var result []ExpandedManifest
-	for _, tmpl := range resources.Templates {
-		expanded, err := ExpandResourceTemplate(tmpl, defaultNamespace, replacements)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, expanded...)
-	}
-
-	return result, nil
-}
-
-// ExpandResourceTemplate 展开单个 ResourceTemplate（支持 List/数组）。
-func ExpandResourceTemplate(tmpl infrav1alpha1.ResourceTemplate, defaultNamespace string, replacements map[string]string) ([]ExpandedManifest, error) {
-	if len(tmpl.Template.Raw) == 0 {
-		return nil, fmt.Errorf("template is empty")
-	}
-
-	action := tmpl.Action
-	if action == "" {
-		action = infrav1alpha1.TemplateActionApply
-	}
-
-	raw := tmpl.Template.Raw
-	if len(replacements) > 0 {
-		raw = ApplyReplacements(raw, replacements)
-	}
-
-	return expandRaw(raw, defaultNamespace, action)
 }
 
 // ApplyReplacements 使用 ${VAR} 形式的占位符做字符串替换。

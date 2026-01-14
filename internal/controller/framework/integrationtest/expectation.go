@@ -6,7 +6,7 @@ import (
 )
 
 // runExpectations 执行一组期望检查（委托给 framework.ExpectationRunner）。
-func (r *IntegrationTestReconciler) runExpectations(expectations *infrav1alpha1.WaitCondition, state map[string]interface{}) (framework.ExpectationResults, error) {
+func (r *IntegrationTestReconciler) runExpectations(expectations *infrav1alpha1.StepCondition, state map[string]interface{}) (framework.ExpectationResults, error) {
 	runner := framework.NewExpectationRunner(r.PluginRegistry)
-	return runner.RunWaitCondition(expectations, state)
+	return runner.RunStepCondition(expectations, state)
 }

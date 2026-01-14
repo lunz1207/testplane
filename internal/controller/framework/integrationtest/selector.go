@@ -235,7 +235,7 @@ func (r *IntegrationTestReconciler) runSingleExpectation(
 	log := logf.FromContext(ctx)
 
 	// 使用 ExpectationRunner 统一处理
-	condition := &infrav1alpha1.WaitCondition{
+	condition := &infrav1alpha1.StepCondition{
 		AllOf: []infrav1alpha1.Expectation{exp},
 	}
 	results, err := r.runExpectations(condition, res)

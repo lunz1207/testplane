@@ -70,7 +70,7 @@ func (r *LoadTestReconciler) reconcileInitializing(ctx context.Context, lt *infr
 func (r *LoadTestReconciler) initializeReadyConditionStatus(
 	ctx context.Context,
 	lt *infrav1alpha1.LoadTest,
-	readyCondition *infrav1alpha1.WaitCondition,
+	readyCondition *infrav1alpha1.ReadyCondition,
 ) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -100,7 +100,7 @@ func (r *LoadTestReconciler) checkReadyCondition(
 	ctx context.Context,
 	lt *infrav1alpha1.LoadTest,
 	target *unstructured.Unstructured,
-	readyCondition *infrav1alpha1.WaitCondition,
+	readyCondition *infrav1alpha1.ReadyCondition,
 ) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -113,7 +113,7 @@ func (r *LoadTestReconciler) checkReadyCondition(
 	}
 
 	// 执行 ReadyCondition 检查
-	results, allPassed := r.runWaitCondition(target, *readyCondition)
+	results, allPassed := r.runReadyCondition(target, *readyCondition)
 	lt.Status.ReadyConditionStatus.Results = results
 
 	if allPassed {
@@ -149,15 +149,15 @@ const annotationSelectorResolved = "infra.testplane.io/selector-resolved"
 func (r *LoadTestReconciler) applyAndResolveTarget(ctx context.Context, lt *infrav1alpha1.LoadTest) (*unstructured.Unstructured, error) {
 	log := logf.FromContext(ctx)
 
-	// 如果有 Template，先展开并应用
-	if lt.Spec.Target.Template != nil {
-		manifest, err := resource.ExpandRawTemplate(lt.Spec.Target.Template, lt.Namespace)
+	// 如果有 Manifest，先展开并应用
+	if len(lt.Spec.Target.Resource.Manifest.Raw) > 0 {
+		manifest, err := resource.ExpandRawTemplate(&lt.Spec.Target.Resource.Manifest, lt.Namespace)
 		if err != nil {
 			return nil, fmt.Errorf("expand target template: %w", err)
 		}
 
 		// 计算当前 target spec 的 hash
-		currentHash := computeTemplateHash(lt.Spec.Target.Template)
+		currentHash := computeTemplateHash(&lt.Spec.Target.Resource.Manifest)
 		savedHash := lt.GetAnnotations()[annotationTargetSpecHash]
 
 		// 只在 hash 变化时 apply，避免重复 apply 导致 SSA 冲突
@@ -193,8 +193,8 @@ func (r *LoadTestReconciler) applyAndResolveTarget(ctx context.Context, lt *infr
 	}
 
 	// 如果有 Selector，直接获取资源
-	if lt.Spec.Target.Selector != nil {
-		target, err := r.getResourceBySelector(ctx, lt, *lt.Spec.Target.Selector)
+	if lt.Spec.Target.Resource.Selector != nil {
+		target, err := r.getResourceBySelector(ctx, lt, *lt.Spec.Target.Resource.Selector)
 		if err != nil {
 			log.Error(err, "failed to get target by selector")
 			return nil, err
@@ -324,9 +324,9 @@ func (r *LoadTestReconciler) getResourceBySelector(ctx context.Context, lt *infr
 
 // getTargetResource 获取 target 资源（便利包装函数）。
 func (r *LoadTestReconciler) getTargetResource(ctx context.Context, lt *infrav1alpha1.LoadTest) (*unstructured.Unstructured, error) {
-	// 如果有 Template，先展开获取 manifest 然后查询
-	if lt.Spec.Target.Template != nil {
-		manifest, err := resource.ExpandRawTemplate(lt.Spec.Target.Template, lt.Namespace)
+	// 如果有 Manifest，先展开获取 manifest 然后查询
+	if len(lt.Spec.Target.Resource.Manifest.Raw) > 0 {
+		manifest, err := resource.ExpandRawTemplate(&lt.Spec.Target.Resource.Manifest, lt.Namespace)
 		if err != nil {
 			return nil, fmt.Errorf("expand target template: %w", err)
 		}
@@ -334,11 +334,11 @@ func (r *LoadTestReconciler) getTargetResource(ctx context.Context, lt *infrav1a
 	}
 
 	// 如果有 Selector，直接查询
-	if lt.Spec.Target.Selector != nil {
-		return r.getResourceBySelector(ctx, lt, *lt.Spec.Target.Selector)
+	if lt.Spec.Target.Resource.Selector != nil {
+		return r.getResourceBySelector(ctx, lt, *lt.Spec.Target.Resource.Selector)
 	}
 
-	return nil, fmt.Errorf("target requires either template or selector")
+	return nil, fmt.Errorf("target requires either manifest or selector")
 }
 
 // matchAnnotations 检查资源的注解是否匹配选择器中的所有注解。

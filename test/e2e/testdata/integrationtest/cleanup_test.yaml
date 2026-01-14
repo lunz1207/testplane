@@ -11,7 +11,7 @@ spec:
   steps:
     - name: create-deployment
       timeoutSeconds: 120
-      template:
+      resource:
         manifest:
           apiVersion: apps/v1
           kind: Deployment
@@ -44,10 +44,11 @@ spec:
       timeoutSeconds: 300
       # Just wait - the deployment should stay running
       # This gives us time to test deletion during running state
-      selector:
-        apiVersion: apps/v1
-        kind: Deployment
-        name: e2e-cleanup-nginx
+      resource:
+        selector:
+          apiVersion: apps/v1
+          kind: Deployment
+          name: e2e-cleanup-nginx
       expectations:
         timeoutSeconds: 240
         allOf:

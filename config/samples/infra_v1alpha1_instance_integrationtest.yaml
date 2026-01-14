@@ -14,7 +14,7 @@ spec:
     delayBetweenRounds: 60
   steps:
     - name: 创建主机
-      template:
+      resource:
         manifest:
           apiVersion: infra.qingcloud.test/v1alpha1
           kind: Instance
@@ -31,7 +31,7 @@ spec:
           - function: InstanceReady
 
     - name: 绑定安全组
-      template:
+      resource:
         manifest:
           apiVersion: infra.qingcloud.test/v1alpha1
           kind: Instance
@@ -48,7 +48,7 @@ spec:
           - function: InstanceSecurityGroupExists
 
     - name: 停止主机
-      template:
+      resource:
         manifest:
           apiVersion: infra.qingcloud.test/v1alpha1
           kind: Instance
@@ -64,7 +64,7 @@ spec:
           - function: InstanceStopped
 
     - name: 启动主机
-      template:
+      resource:
         manifest:
           apiVersion: infra.qingcloud.test/v1alpha1
           kind: Instance
@@ -80,7 +80,7 @@ spec:
           - function: InstanceReady
 
     - name: 解绑安全组
-      template:
+      resource:
         manifest:
           apiVersion: infra.qingcloud.test/v1alpha1
           kind: Instance
@@ -95,7 +95,7 @@ spec:
           - function: InstanceSecurityGroupNotExists
 
     - name: 重启主机
-      template:
+      resource:
         manifest:
           apiVersion: infra.qingcloud.test/v1alpha1
           kind: Instance
@@ -112,7 +112,7 @@ spec:
           - function: InstanceReady
 
     - name: 删除主机
-      template:
+      resource:
         manifest:
           apiVersion: infra.qingcloud.test/v1alpha1
           kind: Instance

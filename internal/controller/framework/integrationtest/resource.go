@@ -11,13 +11,13 @@ import (
 // 调用方应该 requeue 等待，而不是将此视为失败。
 var ErrResourceNotReady = resource.ErrResourceNotReady
 
-// expandStepTemplate 展开步骤的单个模板为 ExpandedManifest 列表。
-// 如果 step.Template 为空，返回空列表。
-func (r *IntegrationTestReconciler) expandStepTemplate(tc *infrav1alpha1.IntegrationTest, step infrav1alpha1.TestStep) ([]resource.ExpandedManifest, error) {
-	if step.Template == nil {
+// expandStepResource 展开步骤的单个 ResourceRef 为 ExpandedManifest 列表。
+// 如果 step.Resource 为空或没有 Manifest，返回空列表。
+func (r *IntegrationTestReconciler) expandStepResource(tc *infrav1alpha1.IntegrationTest, step infrav1alpha1.TestStep) ([]resource.ExpandedManifest, error) {
+	if step.Resource == nil || len(step.Resource.Manifest.Raw) == 0 {
 		return nil, nil
 	}
-	return resource.ExpandManifests([]infrav1alpha1.ManifestAction{*step.Template}, tc.Namespace)
+	return resource.ExpandResourceRef(*step.Resource, tc.Namespace)
 }
 
 // applyResources 批量应用资源。

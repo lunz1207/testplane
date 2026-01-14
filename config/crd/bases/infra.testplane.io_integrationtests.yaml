@@ -93,14 +93,12 @@ spec:
                 items:
                   description: |-
                     TestStep 定义一个测试步骤（单资源）。
-                    Template 和 Selector 互斥，只能指定其中一个：
-                    - Template：创建/更新资源
+                    Resource 中的 Manifest 和 Selector 互斥，只能指定其中一个：
+                    - Manifest：创建/更新/删除资源
                     - Selector：引用已有资源（只读）
                   properties:
                     expectations:
-                      description: |-
-                        Expectations 步骤执行后的业务预期。
-                        如果 Expectation.Resource 未指定，默认使用该步骤的资源。
+                      description: Expectations 步骤执行后的业务预期。
                       properties:
                         allOf:
                           description: AllOf 所有期望都必须满足。
@@ -110,9 +108,6 @@ spec:
                               支持两种模式：
                               1. 内置函数：Function + Params（可选）
                               2. Webhook：Function + Webhook + Params（可选）
-                              断言的资源由上下文自动确定：
-                              - IntegrationTest: 使用当前 Step 的资源（template 或 selector）
-                              - LoadTest: 使用 Target 资源
                             properties:
                               function:
                                 description: |-
@@ -134,16 +129,13 @@ spec:
                             type: object
                           type: array
                         anyOf:
-                          description: AnyOf 任一期望满足即可（可选）。
+                          description: AnyOf 任一期望满足即可。
                           items:
                             description: |-
                               Expectation 定义一个业务期望。
                               支持两种模式：
                               1. 内置函数：Function + Params（可选）
                               2. Webhook：Function + Webhook + Params（可选）
-                              断言的资源由上下文自动确定：
-                              - IntegrationTest: 使用当前 Step 的资源（template 或 selector）
-                              - LoadTest: 使用 Target 资源
                             properties:
                               function:
                                 description: |-
@@ -164,21 +156,9 @@ spec:
                             - function
                             type: object
                           type: array
-                        failureThreshold:
-                          default: 3
-                          description: FailureThreshold 连续失败次数阈值，达到后判定失败，仅用于周期模式。
-                          format: int32
-                          type: integer
-                        intervalSeconds:
-                          default: 10
-                          description: IntervalSeconds 检查间隔（秒），仅用于周期模式。
-                          format: int32
-                          type: integer
                         timeoutSeconds:
                           default: 10
-                          description: |-
-                            TimeoutSeconds 单次断言执行超时（秒）。
-                            控制单次检查的最大执行时间，超时则本次检查失败。
+                          description: TimeoutSeconds 单次检查超时（秒）。
                           format: int32
                           type: integer
                       type: object
@@ -196,9 +176,6 @@ spec:
                               支持两种模式：
                               1. 内置函数：Function + Params（可选）
                               2. Webhook：Function + Webhook + Params（可选）
-                              断言的资源由上下文自动确定：
-                              - IntegrationTest: 使用当前 Step 的资源（template 或 selector）
-                              - LoadTest: 使用 Target 资源
                             properties:
                               function:
                                 description: |-
@@ -220,16 +197,13 @@ spec:
                             type: object
                           type: array
                         anyOf:
-                          description: AnyOf 任一期望满足即可（可选）。
+                          description: AnyOf 任一期望满足即可。
                           items:
                             description: |-
                               Expectation 定义一个业务期望。
                               支持两种模式：
                               1. 内置函数：Function + Params（可选）
                               2. Webhook：Function + Webhook + Params（可选）
-                              断言的资源由上下文自动确定：
-                              - IntegrationTest: 使用当前 Step 的资源（template 或 selector）
-                              - LoadTest: 使用 Target 资源
                             properties:
                               function:
                                 description: |-
@@ -250,72 +224,58 @@ spec:
                             - function
                             type: object
                           type: array
-                        failureThreshold:
-                          default: 3
-                          description: FailureThreshold 连续失败次数阈值，达到后判定失败，仅用于周期模式。
-                          format: int32
-                          type: integer
-                        intervalSeconds:
-                          default: 10
-                          description: IntervalSeconds 检查间隔（秒），仅用于周期模式。
-                          format: int32
-                          type: integer
                         timeoutSeconds:
                           default: 10
-                          description: |-
-                            TimeoutSeconds 单次断言执行超时（秒）。
-                            控制单次检查的最大执行时间，超时则本次检查失败。
+                          description: TimeoutSeconds 单次检查超时（秒）。
                           format: int32
                           type: integer
                       type: object
-                    selector:
-                      description: Selector 资源选择器（与 Template 互斥，只读引用）。
-                      properties:
-                        annotationSelector:
-                          additionalProperties:
-                            type: string
-                          description: AnnotationSelector 注解选择器（与 Name、LabelSelector
-                            互斥）。
-                          type: object
-                        apiVersion:
-                          description: APIVersion 资源的 API 版本。
-                          type: string
-                        kind:
-                          description: Kind 资源的类型。
-                          type: string
-                        labelSelector:
-                          additionalProperties:
-                            type: string
-                          description: LabelSelector 标签选择器（与 Name、AnnotationSelector
-                            互斥）。
-                          type: object
-                        name:
-                          description: Name 资源名称（与 LabelSelector/AnnotationSelector
-                            互斥）。
-                          type: string
-                        namespace:
-                          description: Namespace 资源的命名空间，为空时使用父资源的命名空间。
-                          type: string
-                      required:
-                      - apiVersion
-                      - kind
-                      type: object
-                    template:
-                      description: Template 资源模板（与 Selector 互斥）。
+                    resource:
+                      description: Resource 步骤资源（单资源）。
                       properties:
                         action:
                           default: Apply
-                          description: Action 操作类型（默认 Apply）。
+                          description: Action 操作类型（仅 Manifest 有效，默认 Apply）。
                           enum:
                           - Apply
                           - Delete
                           type: string
                         manifest:
-                          description: Manifest K8s 资源清单（支持单个对象、List 或数组）。
+                          description: Manifest K8s 资源清单（与 Selector 互斥）。
                           type: object
                           x-kubernetes-preserve-unknown-fields: true
-                      required:
-                      - manifest
+                        selector:
+                          description: Selector 资源选择器（与 Manifest 互斥）。
+                          properties:
+                            annotationSelector:
+                              additionalProperties:
+                                type: string
+                              description: AnnotationSelector 注解选择器（与 Name、LabelSelector
+                                互斥）。
+                              type: object
+                            apiVersion:
+                              description: APIVersion 资源的 API 版本。
+                              type: string
+                            kind:
+                              description: Kind 资源的类型。
+                              type: string
+                            labelSelector:
+                              additionalProperties:
+                                type: string
+                              description: LabelSelector 标签选择器（与 Name、AnnotationSelector
+                                互斥）。
+                              type: object
+                            name:
+                              description: Name 资源名称（与 LabelSelector/AnnotationSelector
+                                互斥）。
+                              type: string
+                            namespace:
+                              description: Namespace 资源的命名空间，为空时使用父资源的命名空间。
+                              type: string
+                          required:
+                          - apiVersion
+                          - kind
+                          type: object
                       type: object
                     timeoutSeconds:
                       description: TimeoutSeconds 步骤超时时间（秒），控制整个步骤的超时。

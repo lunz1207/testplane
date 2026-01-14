@@ -31,7 +31,7 @@ func (r *IntegrationTestReconciler) checkStepExpectationsCore(ctx context.Contex
 	log := logf.FromContext(ctx)
 
 	selectors := selectorsFromStep(step)
-	allExpectations := expectationsFromWaitCondition(step.Expectations)
+	allExpectations := expectationsFromStepCondition(step.Expectations)
 
 	state, waiting, err := r.buildStepState(ctx, it, selectors, allExpectations, manifests)
 	if err != nil {
@@ -172,7 +172,7 @@ func (r *IntegrationTestReconciler) checkStepReadyCondition(ctx context.Context,
 	}
 
 	selectors := selectorsFromStep(step)
-	allExpectations := expectationsFromWaitCondition(ready)
+	allExpectations := expectationsFromStepCondition(ready)
 
 	state, waiting, err := r.buildStepState(ctx, it, selectors, allExpectations, manifests)
 	if err != nil {
@@ -279,14 +279,14 @@ func (r *IntegrationTestReconciler) buildStepState(ctx context.Context, it *infr
 
 // selectorsFromStep 从步骤中提取选择器。
 func selectorsFromStep(step infrav1alpha1.TestStep) []infrav1alpha1.ResourceSelector {
-	if step.Selector == nil {
+	if step.Resource == nil || step.Resource.Selector == nil {
 		return nil
 	}
-	return []infrav1alpha1.ResourceSelector{*step.Selector}
+	return []infrav1alpha1.ResourceSelector{*step.Resource.Selector}
 }
 
-// expectationsFromWaitCondition 从 WaitCondition 中提取所有期望。
-func expectationsFromWaitCondition(condition *infrav1alpha1.WaitCondition) []infrav1alpha1.Expectation {
+// expectationsFromStepCondition 从 StepCondition 中提取所有期望。
+func expectationsFromStepCondition(condition *infrav1alpha1.StepCondition) []infrav1alpha1.Expectation {
 	if condition == nil {
 		return nil
 	}

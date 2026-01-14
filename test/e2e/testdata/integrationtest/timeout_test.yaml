@@ -11,7 +11,7 @@ spec:
   steps:
     - name: create-configmap
       timeoutSeconds: 60
-      template:
+      resource:
         manifest:
           apiVersion: v1
           kind: ConfigMap

@@ -33,7 +33,7 @@ func (r *IntegrationTestReconciler) executeSequential(ctx context.Context, it *i
 	stepStatus := r.ensureStepStatus(&it.Status, currentIdx, step)
 
 	// 展开资源模板
-	resourceSpecs, err := r.expandStepTemplate(it, step)
+	resourceSpecs, err := r.expandStepResource(it, step)
 	if err != nil {
 		setStepFailed(&it.Status, stepStatus, step.Name, framework.ReasonFailed, fmt.Sprintf("expand manifests failed: %v", err))
 		// 先 patch，成功后再发 Event
@@ -109,7 +109,7 @@ func (r *IntegrationTestReconciler) executeParallel(ctx context.Context, it *inf
 	// 1b. 展开所有步骤资源模板
 	stepResourceSpecs := make([][]resource.ExpandedManifest, len(steps))
 	for i, step := range steps {
-		specs, err := r.expandStepTemplate(it, step)
+		specs, err := r.expandStepResource(it, step)
 		if err != nil {
 			stepStatus := &it.Status.Steps[i]
 			setStepFailed(&it.Status, stepStatus, step.Name, framework.ReasonFailed, fmt.Sprintf("expand manifests failed: %v", err))

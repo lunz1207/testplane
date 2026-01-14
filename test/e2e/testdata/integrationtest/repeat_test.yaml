@@ -14,7 +14,7 @@ spec:
   steps:
     - name: create-configmap
       timeoutSeconds: 60
-      template:
+      resource:
         manifest:
           apiVersion: v1
           kind: ConfigMap
@@ -32,7 +32,7 @@ spec:
 
     - name: delete-configmap
       timeoutSeconds: 60
-      template:
+      resource:
         action: Delete
         manifest:
           apiVersion: v1

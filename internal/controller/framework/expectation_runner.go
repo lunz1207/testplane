@@ -77,21 +77,50 @@ func (r ExpectationResults) Passed() bool {
 	return true
 }
 
-// RunWaitCondition 执行 WaitCondition 期望检查（allOf + anyOf）。
-// state 参数可以是单个资源的状态，也可以是多个资源的 map。
-func (runner *ExpectationRunner) RunWaitCondition(
-	condition *infrav1alpha1.WaitCondition,
+// RunStepCondition 执行 StepCondition 期望检查（用于 IntegrationTest）。
+func (runner *ExpectationRunner) RunStepCondition(
+	condition *infrav1alpha1.StepCondition,
+	state map[string]interface{},
+) (ExpectationResults, error) {
+	if condition == nil {
+		return ExpectationResults{}, nil
+	}
+	return runner.runExpectations(condition.AllOf, condition.AnyOf, state)
+}
+
+// RunReadyCondition 执行 ReadyCondition 期望检查（用于 LoadTest Target）。
+func (runner *ExpectationRunner) RunReadyCondition(
+	condition *infrav1alpha1.ReadyCondition,
+	state map[string]interface{},
+) (ExpectationResults, error) {
+	if condition == nil {
+		return ExpectationResults{}, nil
+	}
+	return runner.runExpectations(condition.AllOf, condition.AnyOf, state)
+}
+
+// RunHealthCheck 执行 HealthCheck 期望检查（用于 LoadTest 运行期）。
+func (runner *ExpectationRunner) RunHealthCheck(
+	healthCheck *infrav1alpha1.HealthCheck,
+	state map[string]interface{},
+) (ExpectationResults, error) {
+	if healthCheck == nil {
+		return ExpectationResults{}, nil
+	}
+	return runner.runExpectations(healthCheck.AllOf, healthCheck.AnyOf, state)
+}
+
+// runExpectations 执行期望检查（allOf + anyOf）。
+func (runner *ExpectationRunner) runExpectations(
+	allOf []infrav1alpha1.Expectation,
+	anyOf []infrav1alpha1.Expectation,
 	state map[string]interface{},
 ) (ExpectationResults, error) {
 	var results ExpectationResults
 
-	if condition == nil {
-		return results, nil
-	}
-
 	// 执行 allOf
-	results.AllOf = make([]infrav1alpha1.ExpectationResult, 0, len(condition.AllOf))
-	for _, exp := range condition.AllOf {
+	results.AllOf = make([]infrav1alpha1.ExpectationResult, 0, len(allOf))
+	for _, exp := range allOf {
 		result, err := runner.runExpectation(exp, state)
 		if err != nil {
 			return results, err
@@ -100,8 +129,8 @@ func (runner *ExpectationRunner) RunWaitCondition(
 	}
 
 	// 执行 anyOf
-	results.AnyOf = make([]infrav1alpha1.ExpectationResult, 0, len(condition.AnyOf))
-	for _, exp := range condition.AnyOf {
+	results.AnyOf = make([]infrav1alpha1.ExpectationResult, 0, len(anyOf))
+	for _, exp := range anyOf {
 		result, err := runner.runExpectation(exp, state)
 		if err != nil {
 			return results, err
