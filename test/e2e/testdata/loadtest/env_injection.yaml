@@ -63,6 +63,10 @@ spec:
                     command: ["/bin/sh", "-c", "echo TARGET_URL=$TARGET_URL; echo TARGET_HOST=$TARGET_HOST; while true; do sleep 30; done"]
                     env:
                       - name: TARGET_URL
-                        value: "${TARGET_URL}"
+                        valueFrom:
+                          fieldRef:
+                            fieldPath: metadata.annotations['testplane.io/inject-target-url']
                       - name: TARGET_HOST
-                        value: "${TARGET_HOST}"
+                        valueFrom:
+                          fieldRef:
+                            fieldPath: metadata.annotations['testplane.io/inject-target-host']

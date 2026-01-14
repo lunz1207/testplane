@@ -19,7 +19,6 @@ package resource
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -71,15 +70,14 @@ func ExpandSingleResourceRef(ref infrav1alpha1.ResourceRef, defaultNamespace str
 }
 
 // ExpandResourceRefs 展开多个 ResourceRef（支持 List/数组）。
-// replacements 用于对模板内容进行占位符替换（用于 workload 注入）。
-func ExpandResourceRefs(refs []infrav1alpha1.ResourceRef, defaultNamespace string, replacements map[string]string) ([]ExpandedManifest, error) {
+func ExpandResourceRefs(refs []infrav1alpha1.ResourceRef, defaultNamespace string) ([]ExpandedManifest, error) {
 	if len(refs) == 0 {
 		return nil, nil
 	}
 
 	var result []ExpandedManifest
 	for _, ref := range refs {
-		expanded, err := ExpandResourceRefWithReplacements(ref, defaultNamespace, replacements)
+		expanded, err := ExpandResourceRef(ref, defaultNamespace)
 		if err != nil {
 			return nil, err
 		}
@@ -87,25 +85,6 @@ func ExpandResourceRefs(refs []infrav1alpha1.ResourceRef, defaultNamespace strin
 	}
 
 	return result, nil
-}
-
-// ExpandResourceRefWithReplacements 展开单个 ResourceRef 并应用占位符替换。
-func ExpandResourceRefWithReplacements(ref infrav1alpha1.ResourceRef, defaultNamespace string, replacements map[string]string) ([]ExpandedManifest, error) {
-	if len(ref.Manifest.Raw) == 0 {
-		return nil, fmt.Errorf("manifest is empty")
-	}
-
-	action := ref.Action
-	if action == "" {
-		action = infrav1alpha1.TemplateActionApply
-	}
-
-	raw := ref.Manifest.Raw
-	if len(replacements) > 0 {
-		raw = ApplyReplacements(raw, replacements)
-	}
-
-	return expandRaw(raw, defaultNamespace, action)
 }
 
 // ExpandRawTemplate 展开单个 RawExtension 模板（供 LoadTest Target 使用）。
@@ -128,19 +107,6 @@ func ExpandRawTemplate(template *runtime.RawExtension, defaultNamespace string) 
 	}
 
 	return &results[0], nil
-}
-
-// ApplyReplacements 使用 ${VAR} 形式的占位符做字符串替换。
-func ApplyReplacements(raw []byte, replacements map[string]string) []byte {
-	re := regexp.MustCompile(`\$\{([^}]+)\}`)
-	content := re.ReplaceAllStringFunc(string(raw), func(match string) string {
-		key := match[2 : len(match)-1]
-		if val, ok := replacements[key]; ok {
-			return val
-		}
-		return match
-	})
-	return []byte(content)
 }
 
 // expandRaw 将 JSON 原始数据展开为 ExpandedManifest 列表。
