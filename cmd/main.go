@@ -38,9 +38,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	infrav1alpha1 "github.com/lunz1207/testplane/api/v1alpha1"
-	integrationtestcontroller "github.com/lunz1207/testplane/internal/controller/framework/integrationtest"
-	loadtestcontroller "github.com/lunz1207/testplane/internal/controller/framework/loadtest"
-	"github.com/lunz1207/testplane/internal/controller/framework/plugin"
+	"github.com/lunz1207/testplane/internal/builtins"
+	integrationtestcontroller "github.com/lunz1207/testplane/internal/controller/integrationtest"
+	loadtestcontroller "github.com/lunz1207/testplane/internal/controller/loadtest"
+	"github.com/lunz1207/testplane/internal/plugin"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -204,10 +205,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 创建并初始化 Plugin Registry
+	// 用户可以在这里选择注册全部、部分内置函数，或添加自定义函数
+	pluginRegistry := plugin.NewRegistry()
+	builtins.RegisterAll(pluginRegistry)
+
 	if err := (&integrationtestcontroller.IntegrationTestReconciler{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
-		PluginRegistry: plugin.DefaultRegistry,
+		PluginRegistry: pluginRegistry,
 		APIReader:      mgr.GetAPIReader(),
 		Recorder:       mgr.GetEventRecorderFor("integrationtest"),
 	}).SetupWithManager(mgr); err != nil {
@@ -217,7 +223,7 @@ func main() {
 	if err := (&loadtestcontroller.LoadTestReconciler{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
-		PluginRegistry: plugin.DefaultRegistry,
+		PluginRegistry: pluginRegistry,
 		APIReader:      mgr.GetAPIReader(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "LoadTest")
