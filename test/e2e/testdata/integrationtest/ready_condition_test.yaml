@@ -11,7 +11,7 @@ spec:
   steps:
     - name: create-deployment-with-ready-condition
       timeoutSeconds: 120
-      template:
+      resource:
         manifest:
           apiVersion: apps/v1
           kind: Deployment
@@ -49,7 +49,7 @@ spec:
 
     - name: cleanup-deployment
       timeoutSeconds: 60
-      template:
+      resource:
         action: Delete
         manifest:
           apiVersion: apps/v1

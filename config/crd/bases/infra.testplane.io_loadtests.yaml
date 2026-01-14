@@ -20,15 +20,15 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
-    - jsonPath: .status.expectationsStatus.checkCount
+    - jsonPath: .status.healthCheckStatus.checkCount
       name: Checks
       priority: 1
       type: integer
-    - jsonPath: .status.expectationsStatus.passCount
+    - jsonPath: .status.healthCheckStatus.passCount
       name: Pass
       priority: 1
       type: integer
-    - jsonPath: .status.expectationsStatus.failCount
+    - jsonPath: .status.healthCheckStatus.failCount
       name: Fail
       priority: 1
       type: integer
@@ -64,9 +64,9 @@ spec:
           spec:
             description: LoadTestSpec 定义负载测试规格。
             properties:
-              expectations:
+              healthCheck:
                 description: |-
-                  Expectations 运行期断言（周期性执行）。
+                  HealthCheck 运行期健康检查（周期性执行）。
                   使用 IntervalSeconds（检查间隔）和 FailureThreshold（连续失败阈值）。
                 properties:
                   allOf:
@@ -77,9 +77,6 @@ spec:
                         支持两种模式：
                         1. 内置函数：Function + Params（可选）
                         2. Webhook：Function + Webhook + Params（可选）
-                        断言的资源由上下文自动确定：
-                        - IntegrationTest: 使用当前 Step 的资源（template 或 selector）
-                        - LoadTest: 使用 Target 资源
                       properties:
                         function:
                           description: |-
@@ -101,16 +98,13 @@ spec:
                       type: object
                     type: array
                   anyOf:
-                    description: AnyOf 任一期望满足即可（可选）。
+                    description: AnyOf 任一期望满足即可。
                     items:
                       description: |-
                         Expectation 定义一个业务期望。
                         支持两种模式：
                         1. 内置函数：Function + Params（可选）
                         2. Webhook：Function + Webhook + Params（可选）
-                        断言的资源由上下文自动确定：
-                        - IntegrationTest: 使用当前 Step 的资源（template 或 selector）
-                        - LoadTest: 使用 Target 资源
                       properties:
                         function:
                           description: |-
@@ -133,19 +127,17 @@ spec:
                     type: array
                   failureThreshold:
                     default: 3
-                    description: FailureThreshold 连续失败次数阈值，达到后判定失败，仅用于周期模式。
+                    description: FailureThreshold 连续失败阈值。
                     format: int32
                     type: integer
                   intervalSeconds:
                     default: 10
-                    description: IntervalSeconds 检查间隔（秒），仅用于周期模式。
+                    description: IntervalSeconds 检查间隔（秒）。
                     format: int32
                     type: integer
                   timeoutSeconds:
                     default: 10
-                    description: |-
-                      TimeoutSeconds 单次断言执行超时（秒）。
-                      控制单次检查的最大执行时间，超时则本次检查失败。
+                    description: TimeoutSeconds 单次检查超时（秒）。
                     format: int32
                     type: integer
                 type: object
@@ -167,9 +159,6 @@ spec:
                             支持两种模式：
                             1. 内置函数：Function + Params（可选）
                             2. Webhook：Function + Webhook + Params（可选）
-                            断言的资源由上下文自动确定：
-                            - IntegrationTest: 使用当前 Step 的资源（template 或 selector）
-                            - LoadTest: 使用 Target 资源
                           properties:
                             function:
                               description: |-
@@ -191,16 +180,13 @@ spec:
                           type: object
                         type: array
                       anyOf:
-                        description: AnyOf 任一期望满足即可（可选）。
+                        description: AnyOf 任一期望满足即可。
                         items:
                           description: |-
                             Expectation 定义一个业务期望。
                             支持两种模式：
                             1. 内置函数：Function + Params（可选）
                             2. Webhook：Function + Webhook + Params（可选）
-                            断言的资源由上下文自动确定：
-                            - IntegrationTest: 使用当前 Step 的资源（template 或 selector）
-                            - LoadTest: 使用 Target 资源
                           properties:
                             function:
                               description: |-
@@ -221,60 +207,61 @@ spec:
                           - function
                           type: object
                         type: array
-                      failureThreshold:
-                        default: 3
-                        description: FailureThreshold 连续失败次数阈值，达到后判定失败，仅用于周期模式。
-                        format: int32
-                        type: integer
-                      intervalSeconds:
-                        default: 10
-                        description: IntervalSeconds 检查间隔（秒），仅用于周期模式。
-                        format: int32
-                        type: integer
                       timeoutSeconds:
-                        default: 10
-                        description: |-
-                          TimeoutSeconds 单次断言执行超时（秒）。
-                          控制单次检查的最大执行时间，超时则本次检查失败。
+                        default: 300
+                        description: TimeoutSeconds 总超时时间（秒）。
                         format: int32
                         type: integer
                     type: object
-                  selector:
-                    description: Selector 目标资源选择器（与 Template 互斥）。
+                  resource:
+                    description: Resource 目标资源（单资源）。
                     properties:
-                      annotationSelector:
-                        additionalProperties:
-                          type: string
-                        description: AnnotationSelector 注解选择器（与 Name、LabelSelector
-                          互斥）。
+                      action:
+                        default: Apply
+                        description: Action 操作类型（仅 Manifest 有效，默认 Apply）。
+                        enum:
+                        - Apply
+                        - Delete
+                        type: string
+                      manifest:
+                        description: Manifest K8s 资源清单（与 Selector 互斥）。
                         type: object
-                      apiVersion:
-                        description: APIVersion 资源的 API 版本。
-                        type: string
-                      kind:
-                        description: Kind 资源的类型。
-                        type: string
-                      labelSelector:
-                        additionalProperties:
-                          type: string
-                        description: LabelSelector 标签选择器（与 Name、AnnotationSelector
-                          互斥）。
+                        x-kubernetes-preserve-unknown-fields: true
+                      selector:
+                        description: Selector 资源选择器（与 Manifest 互斥）。
+                        properties:
+                          annotationSelector:
+                            additionalProperties:
+                              type: string
+                            description: AnnotationSelector 注解选择器（与 Name、LabelSelector
+                              互斥）。
+                            type: object
+                          apiVersion:
+                            description: APIVersion 资源的 API 版本。
+                            type: string
+                          kind:
+                            description: Kind 资源的类型。
+                            type: string
+                          labelSelector:
+                            additionalProperties:
+                              type: string
+                            description: LabelSelector 标签选择器（与 Name、AnnotationSelector
+                              互斥）。
+                            type: object
+                          name:
+                            description: Name 资源名称（与 LabelSelector/AnnotationSelector
+                              互斥）。
+                            type: string
+                          namespace:
+                            description: Namespace 资源的命名空间，为空时使用父资源的命名空间。
+                            type: string
+                        required:
+                        - apiVersion
+                        - kind
                         type: object
-                      name:
-                        description: Name 资源名称（与 LabelSelector/AnnotationSelector
-                          互斥）。
-                        type: string
-                      namespace:
-                        description: Namespace 资源的命名空间，为空时使用父资源的命名空间。
-                        type: string
-                    required:
-                    - apiVersion
-                    - kind
                     type: object
-                  template:
-                    description: Template 目标资源模板（与 Selector 互斥）。
-                    type: object
-                    x-kubernetes-preserve-unknown-fields: true
+                required:
+                - resource
                 type: object
               workload:
                 description: Workload 负载资源定义。
@@ -308,17 +295,25 @@ spec:
                       type: object
                     type: array
                   resources:
-                    description: Resources 负载资源模板（支持多对象）。
-                    properties:
-                      selectors:
-                        description: Selectors 只读引用的资源列表。
-                        items:
-                          description: |-
-                            ResourceSelector 资源选择器（只读）。
-                            支持三种互斥的选择方式：
-                            1. Name：按名称精确选择单个资源
-                            2. LabelSelector：按标签选择资源
-                            3. AnnotationSelector：按注解选择资源
+                    description: Resources 负载资源（多资源）。
+                    items:
+                      description: |-
+                        ResourceRef 单资源引用（扁平化）。
+                        Manifest 和 Selector 互斥，指定其中一个。
+                      properties:
+                        action:
+                          default: Apply
+                          description: Action 操作类型（仅 Manifest 有效，默认 Apply）。
+                          enum:
+                          - Apply
+                          - Delete
+                          type: string
+                        manifest:
+                          description: Manifest K8s 资源清单（与 Selector 互斥）。
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                        selector:
+                          description: Selector 资源选择器（与 Manifest 互斥）。
                           properties:
                             annotationSelector:
                               additionalProperties:
@@ -349,32 +344,8 @@ spec:
                           - apiVersion
                           - kind
                           type: object
-                        type: array
-                      templates:
-                        description: Templates 要创建/更新/删除的资源模板（支持 List/数组）。
-                        items:
-                          description: |-
-                            ResourceTemplate 资源模板（完整 K8s 对象或 List）。
-                            使用 TemplateAction 控制 Apply 或 Delete。
-                            Deprecated: 使用 ManifestAction 替代。
-                          properties:
-                            action:
-                              default: Apply
-                              description: Action 模板应用动作（默认 Apply）。
-                              enum:
-                              - Apply
-                              - Delete
-                              type: string
-                            name:
-                              description: Name 模板名称（可选，用于错误消息和调试）。
-                              type: string
-                            template:
-                              description: Template 完整的 K8s 对象或 List。
-                              type: object
-                              x-kubernetes-preserve-unknown-fields: true
-                          type: object
-                        type: array
-                    type: object
+                      type: object
+                    type: array
                 required:
                 - resources
                 type: object
@@ -446,8 +417,8 @@ spec:
                   - type
                   type: object
                 type: array
-              expectationsStatus:
-                description: ExpectationsStatus 断言检查状态。
+              healthCheckStatus:
+                description: HealthCheckStatus 健康检查状态。
                 properties:
                   checkCount:
                     description: CheckCount 已检查次数。

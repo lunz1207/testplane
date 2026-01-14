@@ -12,10 +12,11 @@ spec:
     - name: verify-nonexistent-resource
       timeoutSeconds: 30
       # Use selector to reference a non-existent resource
-      selector:
-        apiVersion: v1
-        kind: ConfigMap
-        name: e2e-this-configmap-should-not-exist-anywhere
+      resource:
+        selector:
+          apiVersion: v1
+          kind: ConfigMap
+          name: e2e-this-configmap-should-not-exist-anywhere
       expectations:
         timeoutSeconds: 10
         allOf:

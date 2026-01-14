@@ -20,28 +20,43 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// LoadTestSpec 定义负载测试规格。
-type LoadTestSpec struct {
-	// Target 被测目标资源。
-	// 使用 Target.ReadyCondition 定义就绪条件，通过后才部署 Workload。
-	Target TargetSpec `json:"target"`
-
-	// Workload 负载资源定义。
-	Workload WorkloadSpec `json:"workload"`
-
-	// Expectations 运行期断言（周期性执行）。
-	// 使用 IntervalSeconds（检查间隔）和 FailureThreshold（连续失败阈值）。
-	Expectations *WaitCondition `json:"expectations,omitempty"`
+// ReadyCondition 就绪条件（用于 Target 就绪检查）。
+// 等待模式：持续检查直到通过或超时。
+type ReadyCondition struct {
+	// TimeoutSeconds 总超时时间（秒）。
+	// +kubebuilder:default=300
+	TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
+	// AllOf 所有期望都必须满足。
+	AllOf []Expectation `json:"allOf,omitempty"`
+	// AnyOf 任一期望满足即可。
+	AnyOf []Expectation `json:"anyOf,omitempty"`
 }
 
-// TargetSpec 已移至 common_types.go，LoadTest 和 IntegrationTest 共用。
+// HealthCheck 健康检查（用于运行期周期性断言）。
+// 周期模式：按间隔检查，连续失败达阈值则失败。
+type HealthCheck struct {
+	// IntervalSeconds 检查间隔（秒）。
+	// +kubebuilder:default=10
+	IntervalSeconds int32 `json:"intervalSeconds,omitempty"`
+	// TimeoutSeconds 单次检查超时（秒）。
+	// +kubebuilder:default=10
+	TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
+	// FailureThreshold 连续失败阈值。
+	// +kubebuilder:default=3
+	FailureThreshold int32 `json:"failureThreshold,omitempty"`
+	// AllOf 所有期望都必须满足。
+	AllOf []Expectation `json:"allOf,omitempty"`
+	// AnyOf 任一期望满足即可。
+	AnyOf []Expectation `json:"anyOf,omitempty"`
+}
 
-// WorkloadSpec 负载资源定义。
-type WorkloadSpec struct {
-	// EnvInjection 环境变量注入列表（函数式）。
-	EnvInjection []EnvInjection `json:"envInjection,omitempty"`
-	// Resources 负载资源模板（支持多对象）。
-	Resources ResourcesSpec `json:"resources"`
+// TargetSpec 定义测试目标资源（单资源）。
+type TargetSpec struct {
+	// Resource 目标资源（单资源）。
+	Resource ResourceRef `json:"resource"`
+	// ReadyCondition 就绪条件（可选）。
+	// 创建/更新 Target 后，等待此条件满足才继续执行后续步骤。
+	ReadyCondition *ReadyCondition `json:"readyCondition,omitempty"`
 }
 
 // EnvInjection 环境变量注入定义。
@@ -49,9 +64,28 @@ type WorkloadSpec struct {
 type EnvInjection struct {
 	// Name 环境变量名。
 	Name string `json:"name"`
-
 	// Extract 值提取器。
 	Extract Extractor `json:"extract"`
+}
+
+// WorkloadSpec 负载资源定义。
+type WorkloadSpec struct {
+	// EnvInjection 环境变量注入列表（函数式）。
+	EnvInjection []EnvInjection `json:"envInjection,omitempty"`
+	// Resources 负载资源（多资源）。
+	Resources []ResourceRef `json:"resources"`
+}
+
+// LoadTestSpec 定义负载测试规格。
+type LoadTestSpec struct {
+	// Target 被测目标资源。
+	// 使用 Target.ReadyCondition 定义就绪条件，通过后才部署 Workload。
+	Target TargetSpec `json:"target"`
+	// Workload 负载资源定义。
+	Workload WorkloadSpec `json:"workload"`
+	// HealthCheck 运行期健康检查（周期性执行）。
+	// 使用 IntervalSeconds（检查间隔）和 FailureThreshold（连续失败阈值）。
+	HealthCheck *HealthCheck `json:"healthCheck,omitempty"`
 }
 
 // LoadTestPhase 负载测试阶段。
@@ -71,41 +105,8 @@ const (
 	LoadTestFailed LoadTestPhase = "Failed"
 )
 
-// LoadTestStatus 记录负载测试状态。
-type LoadTestStatus struct {
-	// Phase 测试阶段。
-	Phase LoadTestPhase `json:"phase,omitempty"`
-
-	// Reason 阶段原因。
-	Reason string `json:"reason,omitempty"`
-
-	// Message 详细消息。
-	Message string `json:"message,omitempty"`
-
-	// StartTime 开始时间。
-	StartTime *metav1.Time `json:"startTime,omitempty"`
-
-	// CompletionTime 完成时间。
-	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
-
-	// InjectedValues 已注入的值（便于调试）。
-	InjectedValues map[string]string `json:"injectedValues,omitempty"`
-
-	// ReadyConditionStatus 就绪条件检查状态。
-	ReadyConditionStatus *ReadyConditionStatus `json:"readyConditionStatus,omitempty"`
-
-	// ExpectationsStatus 断言检查状态。
-	ExpectationsStatus *ExpectationsStatus `json:"expectationsStatus,omitempty"`
-
-	// ObservedGeneration 已观察的 Generation。
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
-	// Conditions 条件列表。
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
-}
-
-// ExpectationsStatus 断言检查状态。
-type ExpectationsStatus struct {
+// HealthCheckStatus 健康检查状态。
+type HealthCheckStatus struct {
 	// LastCheckTime 上次检查时间。
 	LastCheckTime *metav1.Time `json:"lastCheckTime,omitempty"`
 	// CheckCount 已检查次数。
@@ -120,12 +121,36 @@ type ExpectationsStatus struct {
 	LastResults []ExpectationResultSummary `json:"lastResults,omitempty"`
 }
 
+// LoadTestStatus 记录负载测试状态。
+type LoadTestStatus struct {
+	// Phase 测试阶段。
+	Phase LoadTestPhase `json:"phase,omitempty"`
+	// Reason 阶段原因。
+	Reason string `json:"reason,omitempty"`
+	// Message 详细消息。
+	Message string `json:"message,omitempty"`
+	// StartTime 开始时间。
+	StartTime *metav1.Time `json:"startTime,omitempty"`
+	// CompletionTime 完成时间。
+	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
+	// InjectedValues 已注入的值（便于调试）。
+	InjectedValues map[string]string `json:"injectedValues,omitempty"`
+	// ReadyConditionStatus 就绪条件检查状态。
+	ReadyConditionStatus *ReadyConditionStatus `json:"readyConditionStatus,omitempty"`
+	// HealthCheckStatus 健康检查状态。
+	HealthCheckStatus *HealthCheckStatus `json:"healthCheckStatus,omitempty"`
+	// ObservedGeneration 已观察的 Generation。
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+	// Conditions 条件列表。
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="Checks",type=integer,JSONPath=`.status.expectationsStatus.checkCount`,priority=1
-// +kubebuilder:printcolumn:name="Pass",type=integer,JSONPath=`.status.expectationsStatus.passCount`,priority=1
-// +kubebuilder:printcolumn:name="Fail",type=integer,JSONPath=`.status.expectationsStatus.failCount`,priority=1
+// +kubebuilder:printcolumn:name="Checks",type=integer,JSONPath=`.status.healthCheckStatus.checkCount`,priority=1
+// +kubebuilder:printcolumn:name="Pass",type=integer,JSONPath=`.status.healthCheckStatus.passCount`,priority=1
+// +kubebuilder:printcolumn:name="Fail",type=integer,JSONPath=`.status.healthCheckStatus.failCount`,priority=1
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.reason`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:resource:shortName=lt

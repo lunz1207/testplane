@@ -11,7 +11,7 @@ spec:
   steps:
     - name: create-deployment
       timeoutSeconds: 120
-      template:
+      resource:
         manifest:
           apiVersion: apps/v1
           kind: Deployment
@@ -42,7 +42,7 @@ spec:
 
     - name: scale-up
       timeoutSeconds: 120
-      template:
+      resource:
         manifest:
           apiVersion: apps/v1
           kind: Deployment
@@ -71,7 +71,7 @@ spec:
 
     - name: delete-deployment
       timeoutSeconds: 120
-      template:
+      resource:
         action: Delete
         manifest:
           apiVersion: apps/v1

@@ -51,25 +51,34 @@ type RepeatConfig struct {
 	DelayBetweenRounds int `json:"delayBetweenRounds,omitempty"`
 }
 
+// StepCondition 步骤条件（用于 readyCondition 和 expectations）。
+// 在步骤超时时间内持续检查直到所有期望通过。
+type StepCondition struct {
+	// TimeoutSeconds 单次检查超时（秒）。
+	// +kubebuilder:default=10
+	TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
+	// AllOf 所有期望都必须满足。
+	AllOf []Expectation `json:"allOf,omitempty"`
+	// AnyOf 任一期望满足即可。
+	AnyOf []Expectation `json:"anyOf,omitempty"`
+}
+
 // TestStep 定义一个测试步骤（单资源）。
-// Template 和 Selector 互斥，只能指定其中一个：
-// - Template：创建/更新资源
+// Resource 中的 Manifest 和 Selector 互斥，只能指定其中一个：
+// - Manifest：创建/更新/删除资源
 // - Selector：引用已有资源（只读）
 type TestStep struct {
 	// Name 步骤名称。
 	Name string `json:"name"`
-	// Template 资源模板（与 Selector 互斥）。
+	// Resource 步骤资源（单资源）。
 	// +optional
-	Template *ManifestAction `json:"template,omitempty"`
-	// Selector 资源选择器（与 Template 互斥，只读引用）。
-	// +optional
-	Selector *ResourceSelector `json:"selector,omitempty"`
+	Resource *ResourceRef `json:"resource,omitempty"`
 	// ReadyCondition 创建/更新资源后的就绪条件（步骤级）。
 	// +optional
-	ReadyCondition *WaitCondition `json:"readyCondition,omitempty"`
+	ReadyCondition *StepCondition `json:"readyCondition,omitempty"`
 	// Expectations 步骤执行后的业务预期。
-	// 如果 Expectation.Resource 未指定，默认使用该步骤的资源。
-	Expectations *WaitCondition `json:"expectations,omitempty"`
+	// +optional
+	Expectations *StepCondition `json:"expectations,omitempty"`
 	// TimeoutSeconds 步骤超时时间（秒），控制整个步骤的超时。
 	TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
 }
@@ -97,8 +106,6 @@ const (
 	IntegrationTestPhaseFailed    IntegrationTestPhase = "Failed"
 	IntegrationTestPhaseAborted   IntegrationTestPhase = "Aborted"
 )
-
-// ExpectationResult 已移至 common_types.go
 
 // StepStatus 记录步骤的执行状态。
 type StepStatus struct {

@@ -8,18 +8,19 @@ metadata:
     app.kubernetes.io/managed-by: testplane-e2e
 spec:
   target:
-    template:
-      apiVersion: v1
-      kind: ConfigMap
-      metadata:
-        name: e2e-loadtest-env-target
-        namespace: default
-        labels:
-          app.kubernetes.io/managed-by: testplane-e2e
-      data:
-        url: "http://example.com:8080"
-        host: "example.com"
-        port: "8080"
+    resource:
+      manifest:
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: e2e-loadtest-env-target
+          namespace: default
+          labels:
+            app.kubernetes.io/managed-by: testplane-e2e
+        data:
+          url: "http://example.com:8080"
+          host: "example.com"
+          port: "8080"
     readyCondition:
       timeoutSeconds: 60
       allOf:
@@ -37,32 +38,31 @@ spec:
           params:
             path: ".data.host"
     resources:
-      templates:
-        - template:
-            apiVersion: apps/v1
-            kind: Deployment
-            metadata:
-              name: e2e-loadtest-env-workload
-              namespace: default
-              labels:
-                app.kubernetes.io/managed-by: testplane-e2e
+      - manifest:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: e2e-loadtest-env-workload
+            namespace: default
+            labels:
+              app.kubernetes.io/managed-by: testplane-e2e
+              app: e2e-loadtest-env-workload
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
                 app: e2e-loadtest-env-workload
-            spec:
-              replicas: 1
-              selector:
-                matchLabels:
+            template:
+              metadata:
+                labels:
                   app: e2e-loadtest-env-workload
-              template:
-                metadata:
-                  labels:
-                    app: e2e-loadtest-env-workload
-                spec:
-                  containers:
-                    - name: busybox
-                      image: library/busybox:1.31.1
-                      command: ["/bin/sh", "-c", "echo TARGET_URL=$TARGET_URL; echo TARGET_HOST=$TARGET_HOST; while true; do sleep 30; done"]
-                      env:
-                        - name: TARGET_URL
-                          value: "${TARGET_URL}"
-                        - name: TARGET_HOST
-                          value: "${TARGET_HOST}"
+              spec:
+                containers:
+                  - name: busybox
+                    image: library/busybox:1.31.1
+                    command: ["/bin/sh", "-c", "echo TARGET_URL=$TARGET_URL; echo TARGET_HOST=$TARGET_HOST; while true; do sleep 30; done"]
+                    env:
+                      - name: TARGET_URL
+                        value: "${TARGET_URL}"
+                      - name: TARGET_HOST
+                        value: "${TARGET_HOST}"

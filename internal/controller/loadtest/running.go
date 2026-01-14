@@ -1,0 +1,306 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package loadtest
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	ctrl "sigs.k8s.io/controller-runtime"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
+	infrav1alpha1 "github.com/lunz1207/testplane/api/v1alpha1"
+	"github.com/lunz1207/testplane/internal/controller/shared"
+	"github.com/lunz1207/testplane/internal/controller/shared/logging"
+)
+
+// transitionToRunning 进入 Running 阶段并应用 workload。
+// emitTargetReadyEvent 参数表示是否在 patch 后发送 TargetReady 事件（readyCondition 通过时使用）。
+func (r *LoadTestReconciler) transitionToRunning(ctx context.Context, lt *infrav1alpha1.LoadTest, emitTargetReadyEvent ...bool) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	// 解析环境变量注入
+	if err := r.resolveAndUpdateEnvInjection(ctx, lt, "resolved values"); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// 应用 workload
+	if err := r.applyWorkload(ctx, lt); err != nil {
+		log.Error(err, "failed to apply workload")
+		return r.setFailed(ctx, lt, "WorkloadApplyFailed", err.Error())
+	}
+
+	// 初始化健康检查状态
+	if lt.Spec.HealthCheck != nil {
+		lt.Status.HealthCheckStatus = &infrav1alpha1.HealthCheckStatus{}
+	}
+
+	lt.Status.Phase = infrav1alpha1.LoadTestRunning
+
+	// 设置 Conditions
+	shared.SetCondition(&lt.Status.Conditions, ConditionTypeTargetReady, metav1.ConditionTrue, "TargetReady", "Target is ready", lt.Generation)
+	shared.SetCondition(&lt.Status.Conditions, ConditionTypeReady, metav1.ConditionTrue, "Running", "LoadTest is running", lt.Generation)
+
+	if err := shared.PatchStatusMerge(ctx, r.Client, lt); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// patch 成功后发送 Event
+	if len(emitTargetReadyEvent) > 0 && emitTargetReadyEvent[0] {
+		shared.EmitNormalEvent(r.Recorder, lt, shared.EventReasonTargetReady, "Target is ready")
+	}
+	shared.EmitNormalEvent(r.Recorder, lt, shared.EventReasonLoadTestRunning, "LoadTest is now running")
+
+	return ctrl.Result{RequeueAfter: defaultRequeue}, nil
+}
+
+// resolveAndUpdateEnvInjection 解析并更新环境变量注入。
+func (r *LoadTestReconciler) resolveAndUpdateEnvInjection(ctx context.Context, lt *infrav1alpha1.LoadTest, logMsg string) error {
+	log := logf.FromContext(ctx)
+
+	if len(lt.Spec.Workload.EnvInjection) == 0 {
+		lt.Status.InjectedValues = nil
+		return nil
+	}
+
+	target, err := r.getTargetResource(ctx, lt)
+	if err != nil {
+		log.Error(err, "failed to get target for env injection")
+		_, _ = r.setFailed(ctx, lt, "TargetGetFailed", err.Error())
+		return err
+	}
+
+	values, err := r.resolveEnvInjection(target, lt.Spec.Workload.EnvInjection)
+	if err != nil {
+		log.Error(err, "failed to resolve env injection")
+		_, _ = r.setFailed(ctx, lt, "EnvInjectionFailed", err.Error())
+		return err
+	}
+
+	lt.Status.InjectedValues = values
+	log.Info(logMsg, "values", values)
+	return nil
+}
+
+// reconcileRunning 处理 Running 阶段。
+// 根据 healthCheck 的 failureThreshold 判断是否失败。
+func (r *LoadTestReconciler) reconcileRunning(ctx context.Context, lt *infrav1alpha1.LoadTest) (ctrl.Result, error) {
+	// 执行健康检查
+	if lt.Spec.HealthCheck != nil {
+		return r.runHealthChecks(ctx, lt)
+	}
+
+	// 无健康检查，继续等待
+	return ctrl.Result{RequeueAfter: defaultRequeue}, nil
+}
+
+// runHealthChecks 执行健康检查。
+func (r *LoadTestReconciler) runHealthChecks(ctx context.Context, lt *infrav1alpha1.LoadTest) (ctrl.Result, error) {
+	interval, status := r.getCheckIntervalAndStatus(lt)
+
+	// 检查是否需要等待
+	if remaining := r.shouldWaitForNextCheck(status, interval); remaining > 0 {
+		return ctrl.Result{RequeueAfter: remaining}, nil
+	}
+
+	return r.executeAndRecordHealthCheck(ctx, lt, status, interval)
+}
+
+// getCheckIntervalAndStatus 获取检查间隔并确保状态存在。
+func (r *LoadTestReconciler) getCheckIntervalAndStatus(lt *infrav1alpha1.LoadTest) (time.Duration, *infrav1alpha1.HealthCheckStatus) {
+	interval := shared.GetTimeoutDuration(lt.Spec.HealthCheck.IntervalSeconds, 10*time.Second)
+
+	if lt.Status.HealthCheckStatus == nil {
+		lt.Status.HealthCheckStatus = &infrav1alpha1.HealthCheckStatus{}
+	}
+
+	return interval, lt.Status.HealthCheckStatus
+}
+
+// shouldWaitForNextCheck 检查是否需要等待下一次检查。
+func (r *LoadTestReconciler) shouldWaitForNextCheck(status *infrav1alpha1.HealthCheckStatus, interval time.Duration) time.Duration {
+	if status.LastCheckTime != nil && time.Since(status.LastCheckTime.Time) < interval {
+		return interval - time.Since(status.LastCheckTime.Time)
+	}
+	return 0
+}
+
+// executeAndRecordHealthCheck 执行健康检查并记录结果。
+// 采用分散 patch 模式：先 patch 状态，成功后再发送 Event。
+func (r *LoadTestReconciler) executeAndRecordHealthCheck(
+	ctx context.Context,
+	lt *infrav1alpha1.LoadTest,
+	status *infrav1alpha1.HealthCheckStatus,
+	interval time.Duration,
+) (ctrl.Result, error) {
+	// 构建 state map，使用 target 资源
+	state := r.buildStateForHealthCheck(ctx, lt)
+
+	// 执行检查
+	results, allPassed := r.runHealthCheckWithState(state, *lt.Spec.HealthCheck)
+
+	// 更新基础状态
+	now := metav1.Now()
+	status.LastCheckTime = &now
+	status.CheckCount++
+	status.LastResults = shared.ToExpectationResultSummaries(results)
+
+	// 处理检查结果（只更新状态，不发送 Event）
+	var eventMsg string
+	var eventType string
+	if allPassed {
+		eventMsg = r.handleHealthCheckPass(lt, status)
+		eventType = "pass"
+	} else {
+		var shouldFail bool
+		eventMsg, shouldFail = r.handleHealthCheckFail(ctx, lt, status)
+		eventType = "fail"
+		if shouldFail {
+			return ctrl.Result{}, nil
+		}
+	}
+
+	// 先 patch 状态
+	if err := shared.PatchStatusMerge(ctx, r.Client, lt); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// patch 成功后再发送 Event
+	if eventType == "pass" {
+		shared.EmitNormalEvent(r.Recorder, lt, shared.EventReasonExpectationPassed, eventMsg)
+	} else {
+		shared.EmitWarningEvent(r.Recorder, lt, shared.EventReasonExpectationFailed, eventMsg)
+	}
+
+	return ctrl.Result{RequeueAfter: interval}, nil
+}
+
+// handleHealthCheckPass 处理健康检查通过的情况。
+// 只更新状态，返回 Event 消息（调用方负责 patch 后发送 Event）。
+func (r *LoadTestReconciler) handleHealthCheckPass(lt *infrav1alpha1.LoadTest, status *infrav1alpha1.HealthCheckStatus) string {
+	log := logf.FromContext(context.Background())
+
+	status.PassCount++
+	status.ConsecutiveFailures = 0
+	logging.HealthCheckPassed(log, int(status.CheckCount))
+
+	msg := fmt.Sprintf("Health check passed (pass: %d, fail: %d)", status.PassCount, status.FailCount)
+
+	// 设置 ExpectationsMet Condition
+	shared.SetCondition(&lt.Status.Conditions, ConditionTypeExpectationsMet, metav1.ConditionTrue, "HealthCheckPassed", msg, lt.Generation)
+
+	return msg
+}
+
+// handleHealthCheckFail 处理健康检查失败的情况。
+// 只更新状态，返回 Event 消息和是否应该终止测试（调用方负责 patch 后发送 Event）。
+func (r *LoadTestReconciler) handleHealthCheckFail(ctx context.Context, lt *infrav1alpha1.LoadTest, status *infrav1alpha1.HealthCheckStatus) (string, bool) {
+	log := logf.FromContext(ctx)
+
+	status.FailCount++
+	status.ConsecutiveFailures++
+
+	threshold := getOrDefaultInt32(lt.Spec.HealthCheck.FailureThreshold, 3)
+	logging.HealthCheckFailed(log, int(status.ConsecutiveFailures), int(threshold))
+
+	msg := fmt.Sprintf("Health check failed (consecutive failures: %d)", status.ConsecutiveFailures)
+
+	// 设置 ExpectationsMet Condition
+	shared.SetCondition(&lt.Status.Conditions, ConditionTypeExpectationsMet, metav1.ConditionFalse, "HealthCheckFailed", msg, lt.Generation)
+
+	if status.ConsecutiveFailures >= threshold {
+		_, _ = r.setFailed(ctx, lt, "HealthCheckFailed",
+			fmt.Sprintf("consecutive failures reached threshold: %d", threshold))
+		return msg, true
+	}
+
+	return msg, false
+}
+
+// buildStateForHealthCheck 为健康检查构建 state map。
+// LoadTest 的断言对象固定为 Target 资源。
+func (r *LoadTestReconciler) buildStateForHealthCheck(
+	ctx context.Context,
+	lt *infrav1alpha1.LoadTest,
+) map[string]interface{} {
+	target, err := r.getTargetResource(ctx, lt)
+	if err != nil || target == nil {
+		return map[string]interface{}{}
+	}
+	return buildStateFromTarget(target)
+}
+
+// runHealthCheckWithState 使用预构建的 state 执行健康检查。
+func (r *LoadTestReconciler) runHealthCheckWithState(state map[string]interface{}, healthCheck infrav1alpha1.HealthCheck) ([]infrav1alpha1.ExpectationResult, bool) {
+	runner := shared.NewExpectationRunner(r.PluginRegistry)
+	results, err := runner.RunHealthCheck(&healthCheck, state)
+
+	// LoadTest 不中断执行，即使出错也继续
+	if err != nil {
+		return results.All(), false
+	}
+
+	return results.All(), results.Passed()
+}
+
+// runReadyCondition 执行等待条件检查（用于 readyCondition）。
+func (r *LoadTestReconciler) runReadyCondition(target *unstructured.Unstructured, condition infrav1alpha1.ReadyCondition) ([]infrav1alpha1.ExpectationResult, bool) {
+	// 构建 state map，key 格式: apiVersion/kind/name
+	// 这样 SelectStateByResource 可以正确匹配 expectation.resource
+	state := buildStateFromTarget(target)
+
+	runner := shared.NewExpectationRunner(r.PluginRegistry)
+	results, err := runner.RunReadyCondition(&condition, state)
+
+	if err != nil {
+		return results.All(), false
+	}
+
+	return results.All(), results.Passed()
+}
+
+// buildStateFromTarget 将 target 资源转换为 state map。
+// key 格式: apiVersion/kind/name，与 SelectStateByResource 期望的格式一致。
+func buildStateFromTarget(target *unstructured.Unstructured) map[string]interface{} {
+	keyStr := fmt.Sprintf("%s/%s/%s", target.GetAPIVersion(), target.GetKind(), target.GetName())
+	return map[string]interface{}{
+		keyStr: target.Object,
+	}
+}
+
+// summarizeResults 汇总期望结果。
+func summarizeResults(results []infrav1alpha1.ExpectationResult) string {
+	passed := 0
+	failed := 0
+	for _, r := range results {
+		if r.Passed {
+			passed++
+		} else {
+			failed++
+		}
+	}
+
+	data, _ := json.Marshal(map[string]int{
+		"passed": passed,
+		"failed": failed,
+	})
+	return string(data)
+}

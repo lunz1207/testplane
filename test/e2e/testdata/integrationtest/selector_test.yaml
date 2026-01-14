@@ -24,11 +24,12 @@ spec:
     # Step 1: Use selector to reference existing resource (read-only)
     - name: verify-existing-configmap
       timeoutSeconds: 60
-      selector:
-        apiVersion: v1
-        kind: ConfigMap
-        namespace: default
-        name: e2e-selector-pre-existing
+      resource:
+        selector:
+          apiVersion: v1
+          kind: ConfigMap
+          namespace: default
+          name: e2e-selector-pre-existing
       expectations:
         timeoutSeconds: 30
         allOf:
@@ -37,7 +38,7 @@ spec:
     # Step 2: Create a new resource
     - name: create-new-configmap
       timeoutSeconds: 60
-      template:
+      resource:
         manifest:
           apiVersion: v1
           kind: ConfigMap

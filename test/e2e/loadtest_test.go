@@ -155,7 +155,7 @@ var _ = Describe("LoadTest Controller", Ordered, func() {
 		})
 
 		It("should perform periodic health checks", func() {
-			By("creating LoadTest with expectations")
+			By("creating LoadTest with healthCheck")
 			Expect(applyYAML(testFile)).To(Succeed())
 
 			By("waiting for test to reach Running phase")
@@ -163,19 +163,19 @@ var _ = Describe("LoadTest Controller", Ordered, func() {
 
 			By("verifying checkCount increases over time")
 			Eventually(func(g Gomega) {
-				count, err := getLoadTestField(testName, testNamespace, ".status.expectationsStatus.checkCount")
+				count, err := getLoadTestField(testName, testNamespace, ".status.healthCheckStatus.checkCount")
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(count).NotTo(Equal("0"), "checkCount should increase")
 			}, 2*time.Minute, 10*time.Second).Should(Succeed())
 
 			By("verifying passCount is tracked")
-			passCount, err := getLoadTestField(testName, testNamespace, ".status.expectationsStatus.passCount")
+			passCount, err := getLoadTestField(testName, testNamespace, ".status.healthCheckStatus.passCount")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(passCount).NotTo(BeEmpty())
 		})
 
 		It("should track lastCheckTime", func() {
-			By("creating LoadTest with expectations")
+			By("creating LoadTest with healthCheck")
 			Expect(applyYAML(testFile)).To(Succeed())
 
 			By("waiting for test to reach Running phase")
@@ -183,7 +183,7 @@ var _ = Describe("LoadTest Controller", Ordered, func() {
 
 			By("verifying lastCheckTime is updated")
 			Eventually(func(g Gomega) {
-				lastCheck, err := getLoadTestField(testName, testNamespace, ".status.expectationsStatus.lastCheckTime")
+				lastCheck, err := getLoadTestField(testName, testNamespace, ".status.healthCheckStatus.lastCheckTime")
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(lastCheck).NotTo(BeEmpty(), "lastCheckTime should be set")
 			}, 2*time.Minute, 10*time.Second).Should(Succeed())
@@ -200,17 +200,17 @@ var _ = Describe("LoadTest Controller", Ordered, func() {
 		})
 
 		It("should fail when consecutive failures exceed threshold", func() {
-			By("creating LoadTest with failing expectations")
+			By("creating LoadTest with failing healthCheck")
 			Expect(applyYAML(testFile)).To(Succeed())
 
 			By("waiting for test to reach Running phase first")
 			waitForLoadTestPhase(testName, testNamespace, "Running", 3*time.Minute)
 
-			By("waiting for test to fail due to expectation failures")
+			By("waiting for test to fail due to healthCheck failures")
 			waitForLoadTestPhase(testName, testNamespace, "Failed", 3*time.Minute)
 
 			By("verifying consecutiveFailures reached threshold")
-			failures, err := getLoadTestField(testName, testNamespace, ".status.expectationsStatus.consecutiveFailures")
+			failures, err := getLoadTestField(testName, testNamespace, ".status.healthCheckStatus.consecutiveFailures")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(failures).NotTo(Equal("0"))
 
