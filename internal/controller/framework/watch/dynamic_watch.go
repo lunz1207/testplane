@@ -54,7 +54,8 @@ func (t WatchTarget) String() string {
 
 // DynamicWatchManager manages dynamic watches for test resources.
 // When watched resources change, it uses OwnerReference to find the associated
-// IntegrationTest and triggers reconciliation.
+// IntegrationTest and triggers reconciliation. For selector-referenced resources
+// (which don't have OwnerReference), it uses an explicit mapping.
 type DynamicWatchManager struct {
 	cache  cache.Cache
 	client client.Client
@@ -65,6 +66,9 @@ type DynamicWatchManager struct {
 	activeTests map[string]struct{}
 	// registeredGVKs tracks which GVKs have informer handlers registered.
 	registeredGVKs map[schema.GroupVersionKind]bool
+	// selectorResources maps selector-referenced resources (without OwnerReference)
+	// to their associated IntegrationTest. Key: "gvk/namespace/name", Value: "namespace/name"
+	selectorResources map[string]string
 
 	// eventChan is used to send events to trigger reconciles.
 	eventChan chan event.TypedGenericEvent[*infrav1alpha1.IntegrationTest]
@@ -73,11 +77,12 @@ type DynamicWatchManager struct {
 // NewDynamicWatchManager creates a new DynamicWatchManager.
 func NewDynamicWatchManager(c cache.Cache, cli client.Client) *DynamicWatchManager {
 	return &DynamicWatchManager{
-		cache:          c,
-		client:         cli,
-		activeTests:    make(map[string]struct{}),
-		registeredGVKs: make(map[schema.GroupVersionKind]bool),
-		eventChan:      make(chan event.TypedGenericEvent[*infrav1alpha1.IntegrationTest], 1024),
+		cache:             c,
+		client:            cli,
+		activeTests:       make(map[string]struct{}),
+		registeredGVKs:    make(map[schema.GroupVersionKind]bool),
+		selectorResources: make(map[string]string),
+		eventChan:         make(chan event.TypedGenericEvent[*infrav1alpha1.IntegrationTest], 1024),
 	}
 }
 
@@ -90,6 +95,8 @@ func (m *DynamicWatchManager) EventSource() source.Source {
 // StartWatch registers the test as active and ensures informer handlers are registered
 // for the target resource GVKs. When these resources change, the manager will use
 // OwnerReference to find the associated IntegrationTest and trigger reconciliation.
+// For selector-referenced resources (which may not have OwnerReference), an explicit
+// mapping is maintained.
 func (m *DynamicWatchManager) StartWatch(ctx context.Context, namespace, testName string, targets []WatchTarget) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -105,19 +112,33 @@ func (m *DynamicWatchManager) StartWatch(ctx context.Context, namespace, testNam
 			// Continue with other targets, don't fail completely
 			continue
 		}
+
+		// Register selector resources (specific named resources that may not have OwnerReference)
+		// These are typically resources referenced by selector, not created by the test
+		if target.Name != "" {
+			resourceKey := m.resourceKey(target.GVK, target.Namespace, target.Name)
+			m.selectorResources[resourceKey] = testKey
+		}
 	}
 
 	log.V(1).Info("started watch", "test", testKey, "targets", len(targets))
 	return nil
 }
 
-// StopWatch marks the test as inactive.
+// StopWatch marks the test as inactive and cleans up selector resource mappings.
 func (m *DynamicWatchManager) StopWatch(namespace, testName string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	testKey := m.testKey(namespace, testName)
 	delete(m.activeTests, testKey)
+
+	// Clean up selector resources for this test
+	for resourceKey, tk := range m.selectorResources {
+		if tk == testKey {
+			delete(m.selectorResources, resourceKey)
+		}
+	}
 
 	log.V(1).Info("stopped watch", "test", testKey)
 }
@@ -160,7 +181,8 @@ func (m *DynamicWatchManager) ensureInformerHandler(ctx context.Context, gvk sch
 }
 
 // onResourceChange handles resource change events.
-// It uses OwnerReference to find the associated IntegrationTest and triggers reconcile.
+// It uses OwnerReference or selectorResources mapping to find the associated
+// IntegrationTest and triggers reconcile.
 func (m *DynamicWatchManager) onResourceChange(obj interface{}) {
 	u, ok := obj.(*unstructured.Unstructured)
 	if !ok {
@@ -175,8 +197,19 @@ func (m *DynamicWatchManager) onResourceChange(obj interface{}) {
 		}
 	}
 
-	// Find IntegrationTest via OwnerReference
+	// Find IntegrationTest via OwnerReference first (for template-created resources)
 	namespace, testName := m.findOwnerIntegrationTest(u)
+
+	// If not found via OwnerReference, check selectorResources mapping
+	if testName == "" {
+		resourceKey := m.resourceKey(u.GroupVersionKind(), u.GetNamespace(), u.GetName())
+		m.mu.RLock()
+		if testKey, ok := m.selectorResources[resourceKey]; ok {
+			namespace, testName = m.splitTestKey(testKey)
+		}
+		m.mu.RUnlock()
+	}
+
 	if testName == "" {
 		return
 	}
@@ -199,7 +232,7 @@ func (m *DynamicWatchManager) onResourceChange(obj interface{}) {
 	// Non-blocking send to avoid blocking the informer
 	select {
 	case m.eventChan <- event.TypedGenericEvent[*infrav1alpha1.IntegrationTest]{Object: it}:
-		log.V(1).Info("triggered reconcile via OwnerReference",
+		log.V(1).Info("triggered reconcile",
 			"test", testKey,
 			"resource", fmt.Sprintf("%s/%s", u.GetKind(), u.GetName()))
 	default:
@@ -222,6 +255,21 @@ func (m *DynamicWatchManager) findOwnerIntegrationTest(u *unstructured.Unstructu
 // testKey generates a unique key for an IntegrationTest.
 func (m *DynamicWatchManager) testKey(namespace, name string) string {
 	return fmt.Sprintf("%s/%s", namespace, name)
+}
+
+// splitTestKey splits a testKey back into namespace and name.
+func (m *DynamicWatchManager) splitTestKey(testKey string) (namespace, name string) {
+	for i := 0; i < len(testKey); i++ {
+		if testKey[i] == '/' {
+			return testKey[:i], testKey[i+1:]
+		}
+	}
+	return "", testKey
+}
+
+// resourceKey generates a unique key for a resource based on GVK and namespace/name.
+func (m *DynamicWatchManager) resourceKey(gvk schema.GroupVersionKind, namespace, name string) string {
+	return fmt.Sprintf("%s/%s/%s/%s/%s", gvk.Group, gvk.Version, gvk.Kind, namespace, name)
 }
 
 // GetEventChannel returns the event channel for testing purposes.
