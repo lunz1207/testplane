@@ -51,6 +51,31 @@ func NewManager(c client.Client, scheme *runtime.Scheme, fieldOwner string, apiR
 	}
 }
 
+// ExecuteManifest 执行单个资源清单（Apply 或 Delete）。
+func (m *Manager) ExecuteManifest(ctx context.Context, owner client.Object, manifest *ExpandedManifest) error {
+	if manifest == nil {
+		return nil
+	}
+	log := logf.FromContext(ctx)
+	log.Info("executing manifest",
+		"kind", manifest.Object.GetKind(),
+		"name", manifest.Object.GetName(),
+		"action", manifest.Action)
+
+	if manifest.IsDelete() {
+		if err := m.DeleteObject(ctx, manifest.Object); err != nil {
+			return fmt.Errorf("failed to delete %s/%s: %w",
+				manifest.Object.GetKind(), manifest.Object.GetName(), err)
+		}
+	} else {
+		if err := m.ApplyObject(ctx, owner, manifest.Object); err != nil {
+			return fmt.Errorf("failed to apply %s/%s: %w",
+				manifest.Object.GetKind(), manifest.Object.GetName(), err)
+		}
+	}
+	return nil
+}
+
 // ExecuteManifests 批量执行资源清单（Apply 或 Delete）。
 // 所有资源必须与 owner 在同一命名空间，通过 ownerRef 管理生命周期。
 func (m *Manager) ExecuteManifests(ctx context.Context, owner client.Object, manifests []ExpandedManifest) error {
@@ -159,6 +184,21 @@ func (m *Manager) DeleteObject(ctx context.Context, obj *unstructured.Unstructur
 	return nil
 }
 
+// WaitForManifest 等待单个资源清单收敛。
+func (m *Manager) WaitForManifest(ctx context.Context, manifest *ExpandedManifest) error {
+	if manifest == nil {
+		return nil
+	}
+	log := logf.FromContext(ctx)
+	if err := m.WaitForObject(ctx, manifest.Object, manifest.IsDelete()); err != nil {
+		return err
+	}
+	log.V(1).Info("manifest converged",
+		"kind", manifest.Object.GetKind(),
+		"name", manifest.Object.GetName())
+	return nil
+}
+
 // WaitForManifests 等待资源清单收敛。
 func (m *Manager) WaitForManifests(ctx context.Context, manifests []ExpandedManifest) error {
 	log := logf.FromContext(ctx)
@@ -221,6 +261,47 @@ func (m *Manager) WaitForObject(ctx context.Context, obj *unstructured.Unstructu
 	}
 
 	return nil
+}
+
+// GatherManifestState 获取单个资源清单的当前状态，用于期望检查。
+func (m *Manager) GatherManifestState(ctx context.Context, manifest *ExpandedManifest) (map[string]interface{}, error) {
+	if manifest == nil {
+		return make(map[string]interface{}), nil
+	}
+	log := logf.FromContext(ctx)
+	obj := manifest.Object
+	keyStr := manifest.StateKey()
+
+	existing := &unstructured.Unstructured{}
+	existing.SetAPIVersion(obj.GetAPIVersion())
+	existing.SetKind(obj.GetKind())
+
+	key := client.ObjectKey{
+		Namespace: obj.GetNamespace(),
+		Name:      obj.GetName(),
+	}
+
+	err := m.Client.Get(ctx, key, existing)
+
+	if manifest.IsDelete() {
+		if errors.IsNotFound(err) {
+			return map[string]interface{}{keyStr: map[string]interface{}{}}, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{keyStr: existing.Object}, nil
+	}
+
+	if errors.IsNotFound(err) {
+		log.Info("resource not found for expectation check", "kind", obj.GetKind(), "name", obj.GetName())
+		return nil, fmt.Errorf("%w: %s/%s not found", ErrResourceNotReady, obj.GetKind(), obj.GetName())
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{keyStr: existing.Object}, nil
 }
 
 // GatherManifestStates 获取指定资源清单的当前状态，用于期望检查。

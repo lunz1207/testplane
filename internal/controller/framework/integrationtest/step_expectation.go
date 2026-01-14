@@ -27,13 +27,13 @@ const (
 
 // checkStepExpectationsCore 核心期望检查逻辑，被 checkStepExpectations 和 checkParallelStepExpectations 共用。
 // 返回 outcome 和是否需要发送 Event（调用方负责 patch 和发送 Event）。
-func (r *IntegrationTestReconciler) checkStepExpectationsCore(ctx context.Context, it *infrav1alpha1.IntegrationTest, stepStatus *infrav1alpha1.StepStatus, step infrav1alpha1.TestStep, manifests []resource.ExpandedManifest) (stepExpectationOutcome, string) {
+func (r *IntegrationTestReconciler) checkStepExpectationsCore(ctx context.Context, it *infrav1alpha1.IntegrationTest, stepStatus *infrav1alpha1.StepStatus, step infrav1alpha1.TestStep, manifest *resource.ExpandedManifest) (stepExpectationOutcome, string) {
 	log := logf.FromContext(ctx)
 
 	selectors := selectorsFromStep(step)
 	allExpectations := expectationsFromStepCondition(step.Expectations)
 
-	state, waiting, err := r.buildStepState(ctx, it, selectors, allExpectations, manifests)
+	state, waiting, err := r.buildStepState(ctx, it, selectors, allExpectations, manifest)
 	if err != nil {
 		setStepFailed(&it.Status, stepStatus, step.Name, framework.ReasonFailed, fmt.Sprintf("gather state failed: %v", err))
 		return outcomeFailed, ""
@@ -78,18 +78,18 @@ func (r *IntegrationTestReconciler) checkStepExpectationsCore(ctx context.Contex
 }
 
 // checkParallelStepExpectations 检查并行步骤的期望，返回是否通过。
-func (r *IntegrationTestReconciler) checkParallelStepExpectations(ctx context.Context, it *infrav1alpha1.IntegrationTest, stepStatus *infrav1alpha1.StepStatus, step infrav1alpha1.TestStep, manifests []resource.ExpandedManifest) (ctrl.Result, bool) {
+func (r *IntegrationTestReconciler) checkParallelStepExpectations(ctx context.Context, it *infrav1alpha1.IntegrationTest, stepStatus *infrav1alpha1.StepStatus, step infrav1alpha1.TestStep, manifest *resource.ExpandedManifest) (ctrl.Result, bool) {
 	_ = logf.FromContext(ctx)
 
 	// ReadyCondition（可选，仅并行步骤需要）
 	if step.ReadyCondition != nil {
-		result, err := r.checkStepReadyCondition(ctx, it, stepStatus, step, manifests)
+		result, err := r.checkStepReadyCondition(ctx, it, stepStatus, step, manifest)
 		if err != nil || result.RequeueAfter > 0 {
 			return result, false
 		}
 	}
 
-	outcome, eventMsg := r.checkStepExpectationsCore(ctx, it, stepStatus, step, manifests)
+	outcome, eventMsg := r.checkStepExpectationsCore(ctx, it, stepStatus, step, manifest)
 	switch outcome {
 	case outcomeWaiting:
 		return ctrl.Result{RequeueAfter: defaultRequeue}, false
@@ -101,7 +101,7 @@ func (r *IntegrationTestReconciler) checkParallelStepExpectations(ctx context.Co
 			return ctrl.Result{}, false
 		}
 		if eventMsg != "" {
-			framework.EmitWarningEvent(r.Recorder, it, EventReasonStepFailed, eventMsg)
+			framework.EmitWarningEvent(r.Recorder, it, framework.EventReasonStepFailed, eventMsg)
 		}
 		return ctrl.Result{}, false
 	default: // outcomeSucceeded
@@ -112,15 +112,15 @@ func (r *IntegrationTestReconciler) checkParallelStepExpectations(ctx context.Co
 			return ctrl.Result{}, false
 		}
 		if eventMsg != "" {
-			framework.EmitNormalEvent(r.Recorder, it, EventReasonStepSucceeded, eventMsg)
+			framework.EmitNormalEvent(r.Recorder, it, framework.EventReasonStepSucceeded, eventMsg)
 		}
 		return ctrl.Result{}, true
 	}
 }
 
 // checkStepExpectations 检查步骤的期望。
-func (r *IntegrationTestReconciler) checkStepExpectations(ctx context.Context, it *infrav1alpha1.IntegrationTest, stepStatus *infrav1alpha1.StepStatus, step infrav1alpha1.TestStep, manifests []resource.ExpandedManifest) (ctrl.Result, error) {
-	outcome, eventMsg := r.checkStepExpectationsCore(ctx, it, stepStatus, step, manifests)
+func (r *IntegrationTestReconciler) checkStepExpectations(ctx context.Context, it *infrav1alpha1.IntegrationTest, stepStatus *infrav1alpha1.StepStatus, step infrav1alpha1.TestStep, manifest *resource.ExpandedManifest) (ctrl.Result, error) {
+	outcome, eventMsg := r.checkStepExpectationsCore(ctx, it, stepStatus, step, manifest)
 	switch outcome {
 	case outcomeWaiting:
 		return ctrl.Result{RequeueAfter: defaultRequeue}, nil
@@ -133,7 +133,7 @@ func (r *IntegrationTestReconciler) checkStepExpectations(ctx context.Context, i
 			return ctrl.Result{}, err
 		}
 		if eventMsg != "" {
-			framework.EmitWarningEvent(r.Recorder, it, EventReasonStepFailed, eventMsg)
+			framework.EmitWarningEvent(r.Recorder, it, framework.EventReasonStepFailed, eventMsg)
 		}
 		return r.handleStepFailure(ctx, it)
 	default: // outcomeSucceeded
@@ -145,14 +145,14 @@ func (r *IntegrationTestReconciler) checkStepExpectations(ctx context.Context, i
 			return ctrl.Result{}, err
 		}
 		if eventMsg != "" {
-			framework.EmitNormalEvent(r.Recorder, it, EventReasonStepSucceeded, eventMsg)
+			framework.EmitNormalEvent(r.Recorder, it, framework.EventReasonStepSucceeded, eventMsg)
 		}
 		return ctrl.Result{Requeue: true}, nil
 	}
 }
 
 // checkStepReadyCondition 检查步骤级 ReadyCondition。
-func (r *IntegrationTestReconciler) checkStepReadyCondition(ctx context.Context, it *infrav1alpha1.IntegrationTest, stepStatus *infrav1alpha1.StepStatus, step infrav1alpha1.TestStep, manifests []resource.ExpandedManifest) (ctrl.Result, error) {
+func (r *IntegrationTestReconciler) checkStepReadyCondition(ctx context.Context, it *infrav1alpha1.IntegrationTest, stepStatus *infrav1alpha1.StepStatus, step infrav1alpha1.TestStep, manifest *resource.ExpandedManifest) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	ready := step.ReadyCondition
@@ -174,7 +174,7 @@ func (r *IntegrationTestReconciler) checkStepReadyCondition(ctx context.Context,
 	selectors := selectorsFromStep(step)
 	allExpectations := expectationsFromStepCondition(ready)
 
-	state, waiting, err := r.buildStepState(ctx, it, selectors, allExpectations, manifests)
+	state, waiting, err := r.buildStepState(ctx, it, selectors, allExpectations, manifest)
 	if err != nil {
 		stepStatus.ReadyConditionStatus.State = framework.StateFailed
 		stepStatus.ReadyConditionStatus.Results = nil
@@ -183,7 +183,7 @@ func (r *IntegrationTestReconciler) checkStepReadyCondition(ctx context.Context,
 		if patchErr := r.patchStatus(ctx, it, it.Status); patchErr != nil {
 			return ctrl.Result{}, patchErr
 		}
-		framework.EmitWarningEvent(r.Recorder, it, EventReasonStepFailed, fmt.Sprintf("[Round %d] 步骤 %s readyCondition 错误: %v", it.Status.CurrentRound, step.Name, err))
+		framework.EmitWarningEvent(r.Recorder, it, framework.EventReasonStepFailed, fmt.Sprintf("[Round %d] 步骤 %s readyCondition 错误: %v", it.Status.CurrentRound, step.Name, err))
 		return r.handleStepFailure(ctx, it)
 	}
 
@@ -197,7 +197,7 @@ func (r *IntegrationTestReconciler) checkStepReadyCondition(ctx context.Context,
 			if patchErr := r.patchStatus(ctx, it, it.Status); patchErr != nil {
 				return ctrl.Result{}, patchErr
 			}
-			framework.EmitWarningEvent(r.Recorder, it, EventReasonIntegrationTestTimeout, fmt.Sprintf("[Round %d] 步骤 %s readyCondition 超时", it.Status.CurrentRound, step.Name))
+			framework.EmitWarningEvent(r.Recorder, it, framework.EventReasonIntegrationTestTimeout, fmt.Sprintf("[Round %d] 步骤 %s readyCondition 超时", it.Status.CurrentRound, step.Name))
 			return r.handleStepFailure(ctx, it)
 		}
 		stepStatus.ReadyConditionStatus.State = framework.StateRunning
@@ -213,7 +213,7 @@ func (r *IntegrationTestReconciler) checkStepReadyCondition(ctx context.Context,
 		if patchErr := r.patchStatus(ctx, it, it.Status); patchErr != nil {
 			return ctrl.Result{}, patchErr
 		}
-		framework.EmitWarningEvent(r.Recorder, it, EventReasonStepFailed, fmt.Sprintf("[Round %d] 步骤 %s readyCondition 错误: %v", it.Status.CurrentRound, step.Name, err))
+		framework.EmitWarningEvent(r.Recorder, it, framework.EventReasonStepFailed, fmt.Sprintf("[Round %d] 步骤 %s readyCondition 错误: %v", it.Status.CurrentRound, step.Name, err))
 		return r.handleStepFailure(ctx, it)
 	}
 
@@ -227,7 +227,7 @@ func (r *IntegrationTestReconciler) checkStepReadyCondition(ctx context.Context,
 			if patchErr := r.patchStatus(ctx, it, it.Status); patchErr != nil {
 				return ctrl.Result{}, patchErr
 			}
-			framework.EmitWarningEvent(r.Recorder, it, EventReasonIntegrationTestTimeout, fmt.Sprintf("[Round %d] 步骤 %s readyCondition 超时", it.Status.CurrentRound, step.Name))
+			framework.EmitWarningEvent(r.Recorder, it, framework.EventReasonIntegrationTestTimeout, fmt.Sprintf("[Round %d] 步骤 %s readyCondition 超时", it.Status.CurrentRound, step.Name))
 			return r.handleStepFailure(ctx, it)
 		}
 		stepStatus.ReadyConditionStatus.State = framework.StateRunning
@@ -242,11 +242,11 @@ func (r *IntegrationTestReconciler) checkStepReadyCondition(ctx context.Context,
 }
 
 // buildStepState 收集模板资源与选择器资源的状态。
-func (r *IntegrationTestReconciler) buildStepState(ctx context.Context, it *infrav1alpha1.IntegrationTest, selectors []infrav1alpha1.ResourceSelector, expectations []infrav1alpha1.Expectation, manifests []resource.ExpandedManifest) (map[string]interface{}, bool, error) {
+func (r *IntegrationTestReconciler) buildStepState(ctx context.Context, it *infrav1alpha1.IntegrationTest, selectors []infrav1alpha1.ResourceSelector, expectations []infrav1alpha1.Expectation, manifest *resource.ExpandedManifest) (map[string]interface{}, bool, error) {
 	state := make(map[string]interface{})
 
-	if len(manifests) > 0 {
-		resourceState, err := r.gatherResourceStates(ctx, manifests)
+	if manifest != nil {
+		resourceState, err := r.gatherResourceState(ctx, manifest)
 		if err != nil {
 			if stderrors.Is(err, ErrResourceNotReady) {
 				return nil, true, nil

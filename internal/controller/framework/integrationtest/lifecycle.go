@@ -74,6 +74,6 @@ func (r *IntegrationTestReconciler) finishTest(ctx context.Context, it *infrav1a
 	if err := r.patchStatus(ctx, it, it.Status); err != nil {
 		return ctrl.Result{}, err
 	}
-	framework.EmitNormalEvent(r.Recorder, it, EventReasonIntegrationTestSucceeded, "测试用例执行成功")
+	framework.EmitNormalEvent(r.Recorder, it, framework.EventReasonIntegrationTestSucceeded, "测试用例执行成功")
 	return ctrl.Result{}, nil
 }

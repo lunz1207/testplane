@@ -29,7 +29,7 @@ func (r *IntegrationTestReconciler) executeTest(ctx context.Context, it *infrav1
 		if err := r.patchStatus(ctx, it, it.Status); err != nil {
 			return ctrl.Result{}, err
 		}
-		framework.EmitNormalEvent(r.Recorder, it, EventReasonIntegrationTestStarted, fmt.Sprintf("开始执行测试用例，模式: %s, 轮数: %s", it.Spec.Mode, formatTotalRounds(it)))
+		framework.EmitNormalEvent(r.Recorder, it, framework.EventReasonIntegrationTestStarted, fmt.Sprintf("开始执行测试用例，模式: %s, 轮数: %s", it.Spec.Mode, formatTotalRounds(it)))
 	}
 
 	// 检查是否达到停止条件

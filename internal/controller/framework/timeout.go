@@ -26,12 +26,19 @@ const (
 	DefaultWaitConditionTimeout = 5 * time.Minute
 	// DefaultExpectationTimeout 默认断言超时（5 分钟）
 	DefaultExpectationTimeout = 5 * time.Minute
+	// DefaultReadyConditionTimeout 默认就绪条件超时（5 分钟）
+	DefaultReadyConditionTimeout = 5 * time.Minute
 )
 
-// GetTimeoutDuration 从 int32 秒获取 Duration，如果为 0 返回默认值。
+// GetTimeoutDuration 从 int32 秒获取 Duration，如果为 0 或负数返回默认值。
 func GetTimeoutDuration(seconds int32, defaultDuration time.Duration) time.Duration {
 	if seconds <= 0 {
 		return defaultDuration
 	}
 	return time.Duration(seconds) * time.Second
+}
+
+// CalculateDeadline 计算截止时间。
+func CalculateDeadline(start time.Time, timeout time.Duration) time.Time {
+	return start.Add(timeout)
 }

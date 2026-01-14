@@ -5,6 +5,40 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
+// 共享的 Event 原因
+const (
+	EventReasonExpectationPassed = "ExpectationPassed"
+	EventReasonExpectationFailed = "ExpectationFailed"
+)
+
+// IntegrationTest Event 原因常量
+const (
+	EventReasonIntegrationTestStarted   = "IntegrationTestStarted"
+	EventReasonIntegrationTestSucceeded = "IntegrationTestSucceeded"
+	EventReasonIntegrationTestFailed    = "IntegrationTestFailed"
+	EventReasonIntegrationTestTimeout   = "IntegrationTestTimeout"
+
+	EventReasonStepStarted   = "StepStarted"
+	EventReasonStepSucceeded = "StepSucceeded"
+	EventReasonStepFailed    = "StepFailed"
+)
+
+// LoadTest Event 原因常量
+const (
+	EventReasonLoadTestStarted   = "LoadTestStarted"
+	EventReasonLoadTestRunning   = "LoadTestRunning"
+	EventReasonLoadTestSucceeded = "LoadTestSucceeded"
+	EventReasonLoadTestFailed    = "LoadTestFailed"
+
+	EventReasonTargetApplied      = "TargetApplied"
+	EventReasonTargetReady        = "TargetReady"
+	EventReasonTargetApplyFailed  = "TargetApplyFailed"
+	EventReasonReadyConditionWait = "ReadyConditionWait"
+
+	EventReasonWorkloadApplied     = "WorkloadApplied"
+	EventReasonWorkloadApplyFailed = "WorkloadApplyFailed"
+)
+
 // EventRecorder 定义事件记录器接口
 type EventRecorder interface {
 	Event(object runtime.Object, eventtype, reason, message string)

@@ -23,9 +23,3 @@ const (
 	ReasonFailed    = "Failed"
 	ReasonTimeout   = "Timeout"
 )
-
-// 共享的 Event 原因
-const (
-	EventReasonExpectationPassed = "ExpectationPassed"
-	EventReasonExpectationFailed = "ExpectationFailed"
-)

@@ -55,8 +55,8 @@ func (r *LoadTestReconciler) transitionToRunning(ctx context.Context, lt *infrav
 	lt.Status.Phase = infrav1alpha1.LoadTestRunning
 
 	// 设置 Conditions
-	setCondition(&lt.Status, ConditionTypeTargetReady, metav1.ConditionTrue, "TargetReady", "Target is ready", lt.Generation)
-	setCondition(&lt.Status, ConditionTypeReady, metav1.ConditionTrue, "Running", "LoadTest is running", lt.Generation)
+	framework.SetCondition(&lt.Status.Conditions, ConditionTypeTargetReady, metav1.ConditionTrue, "TargetReady", "Target is ready", lt.Generation)
+	framework.SetCondition(&lt.Status.Conditions, ConditionTypeReady, metav1.ConditionTrue, "Running", "LoadTest is running", lt.Generation)
 
 	if err := framework.PatchStatusMerge(ctx, r.Client, lt); err != nil {
 		return ctrl.Result{}, err
@@ -64,9 +64,9 @@ func (r *LoadTestReconciler) transitionToRunning(ctx context.Context, lt *infrav
 
 	// patch 成功后发送 Event
 	if len(emitTargetReadyEvent) > 0 && emitTargetReadyEvent[0] {
-		framework.EmitNormalEvent(r.Recorder, lt, EventReasonTargetReady, "Target is ready")
+		framework.EmitNormalEvent(r.Recorder, lt, framework.EventReasonTargetReady, "Target is ready")
 	}
-	framework.EmitNormalEvent(r.Recorder, lt, EventReasonLoadTestRunning, "LoadTest is now running")
+	framework.EmitNormalEvent(r.Recorder, lt, framework.EventReasonLoadTestRunning, "LoadTest is now running")
 
 	return ctrl.Result{RequeueAfter: defaultRequeue}, nil
 }
@@ -125,7 +125,7 @@ func (r *LoadTestReconciler) runHealthChecks(ctx context.Context, lt *infrav1alp
 
 // getCheckIntervalAndStatus 获取检查间隔并确保状态存在。
 func (r *LoadTestReconciler) getCheckIntervalAndStatus(lt *infrav1alpha1.LoadTest) (time.Duration, *infrav1alpha1.HealthCheckStatus) {
-	interval := getDurationOrDefault(lt.Spec.HealthCheck.IntervalSeconds, 10*time.Second)
+	interval := framework.GetTimeoutDuration(lt.Spec.HealthCheck.IntervalSeconds, 10*time.Second)
 
 	if lt.Status.HealthCheckStatus == nil {
 		lt.Status.HealthCheckStatus = &infrav1alpha1.HealthCheckStatus{}
@@ -204,7 +204,7 @@ func (r *LoadTestReconciler) handleHealthCheckPass(lt *infrav1alpha1.LoadTest, s
 	msg := fmt.Sprintf("Health check passed (pass: %d, fail: %d)", status.PassCount, status.FailCount)
 
 	// 设置 ExpectationsMet Condition
-	setCondition(&lt.Status, ConditionTypeExpectationsMet, metav1.ConditionTrue, "HealthCheckPassed", msg, lt.Generation)
+	framework.SetCondition(&lt.Status.Conditions, ConditionTypeExpectationsMet, metav1.ConditionTrue, "HealthCheckPassed", msg, lt.Generation)
 
 	return msg
 }
@@ -221,7 +221,7 @@ func (r *LoadTestReconciler) handleHealthCheckFail(ctx context.Context, lt *infr
 	msg := fmt.Sprintf("Health check failed (consecutive failures: %d)", status.ConsecutiveFailures)
 
 	// 设置 ExpectationsMet Condition
-	setCondition(&lt.Status, ConditionTypeExpectationsMet, metav1.ConditionFalse, "HealthCheckFailed", msg, lt.Generation)
+	framework.SetCondition(&lt.Status.Conditions, ConditionTypeExpectationsMet, metav1.ConditionFalse, "HealthCheckFailed", msg, lt.Generation)
 
 	// 检查是否达到失败阈值
 	threshold := getOrDefaultInt32(lt.Spec.HealthCheck.FailureThreshold, 3)

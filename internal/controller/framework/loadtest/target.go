@@ -36,11 +36,6 @@ import (
 	"github.com/lunz1207/testplane/internal/controller/framework/resource"
 )
 
-const (
-	// defaultReadyConditionTimeout 默认就绪条件超时时间。
-	defaultReadyConditionTimeout = 5 * time.Minute
-)
-
 // reconcileInitializing 处理 Initializing 阶段（应用 Target + 解析注入 + 等待就绪条件）。
 func (r *LoadTestReconciler) reconcileInitializing(ctx context.Context, lt *infrav1alpha1.LoadTest) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -75,7 +70,7 @@ func (r *LoadTestReconciler) initializeReadyConditionStatus(
 	log := logf.FromContext(ctx)
 
 	now := metav1.Now()
-	timeout := getDurationOrDefault(readyCondition.TimeoutSeconds, defaultReadyConditionTimeout)
+	timeout := framework.GetTimeoutDuration(readyCondition.TimeoutSeconds, framework.DefaultReadyConditionTimeout)
 	deadline := metav1.NewTime(now.Add(timeout))
 
 	lt.Status.ReadyConditionStatus = &infrav1alpha1.ReadyConditionStatus{
@@ -89,7 +84,7 @@ func (r *LoadTestReconciler) initializeReadyConditionStatus(
 	}
 
 	log.Info("initialized readyCondition check", "timeout", timeout, "deadline", deadline.Time)
-	framework.EmitNormalEvent(r.Recorder, lt, EventReasonReadyConditionWait,
+	framework.EmitNormalEvent(r.Recorder, lt, framework.EventReasonReadyConditionWait,
 		fmt.Sprintf("Waiting for target to be ready (timeout: %v)", timeout))
 
 	return ctrl.Result{Requeue: true}, nil
@@ -108,7 +103,7 @@ func (r *LoadTestReconciler) checkReadyCondition(
 	if lt.Status.ReadyConditionStatus.Deadline != nil &&
 		time.Now().After(lt.Status.ReadyConditionStatus.Deadline.Time) {
 		// 设置 TargetReady Condition 为 False
-		setCondition(&lt.Status, ConditionTypeTargetReady, metav1.ConditionFalse, "ReadyConditionTimeout", "readyCondition timeout exceeded", lt.Generation)
+		framework.SetCondition(&lt.Status.Conditions, ConditionTypeTargetReady, metav1.ConditionFalse, "ReadyConditionTimeout", "readyCondition timeout exceeded", lt.Generation)
 		return r.setFailed(ctx, lt, "ReadyConditionTimeout", "readyCondition timeout exceeded")
 	}
 
@@ -127,7 +122,7 @@ func (r *LoadTestReconciler) checkReadyCondition(
 	}
 
 	// 设置 TargetReady Condition 为等待中
-	setCondition(&lt.Status, ConditionTypeTargetReady, metav1.ConditionFalse, "WaitingForReadyCondition", "Waiting for target to become ready", lt.Generation)
+	framework.SetCondition(&lt.Status.Conditions, ConditionTypeTargetReady, metav1.ConditionFalse, "WaitingForReadyCondition", "Waiting for target to become ready", lt.Generation)
 
 	// 继续等待
 	log.Info("readyCondition not passed, retrying", "results", summarizeResults(results))
@@ -186,7 +181,7 @@ func (r *LoadTestReconciler) applyAndResolveTarget(ctx context.Context, lt *infr
 
 		// 只在实际 apply 时发送事件，避免重复
 		if needEmitEvent {
-			framework.EmitNormalEvent(r.Recorder, lt, EventReasonTargetApplied,
+			framework.EmitNormalEvent(r.Recorder, lt, framework.EventReasonTargetApplied,
 				fmt.Sprintf("Target %s/%s resolved", target.GetKind(), target.GetName()))
 		}
 		return target, nil
@@ -205,7 +200,7 @@ func (r *LoadTestReconciler) applyAndResolveTarget(ctx context.Context, lt *infr
 			if err := r.markSelectorResolved(ctx, lt); err != nil {
 				return nil, err
 			}
-			framework.EmitNormalEvent(r.Recorder, lt, EventReasonTargetApplied,
+			framework.EmitNormalEvent(r.Recorder, lt, framework.EventReasonTargetApplied,
 				fmt.Sprintf("Target %s/%s resolved", target.GetKind(), target.GetName()))
 		}
 		return target, nil

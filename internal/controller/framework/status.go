@@ -46,6 +46,11 @@ func PatchIntegrationTestStatus(ctx context.Context, c client.Client, name, name
 	)
 }
 
+// PatchIntegrationTestStatusFromObject 便捷函数，直接从对象更新状态。
+func PatchIntegrationTestStatusFromObject(ctx context.Context, c client.Client, it *infrav1alpha1.IntegrationTest) error {
+	return PatchIntegrationTestStatus(ctx, c, it.Name, it.Namespace, it.Status)
+}
+
 // PatchLoadTestStatus 使用纯正 SSA 更新 LoadTest 状态。
 // 构造干净的 Apply Configuration，只包含标识字段和 status，不依赖 GET 到的对象。
 func PatchLoadTestStatus(ctx context.Context, c client.Client, name, namespace string, status infrav1alpha1.LoadTestStatus) error {
@@ -59,6 +64,11 @@ func PatchLoadTestStatus(ctx context.Context, c client.Client, name, namespace s
 		client.FieldOwner(FieldOwnerLoadTest),
 		client.ForceOwnership,
 	)
+}
+
+// PatchLoadTestStatusFromObject 便捷函数，直接从对象更新状态。
+func PatchLoadTestStatusFromObject(ctx context.Context, c client.Client, lt *infrav1alpha1.LoadTest) error {
+	return PatchLoadTestStatus(ctx, c, lt.Name, lt.Namespace, lt.Status)
 }
 
 // PatchStatusSSA 使用 Server-Side Apply 更新 status（通用版本，保留向后兼容）。

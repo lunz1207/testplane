@@ -33,14 +33,14 @@ func (r *IntegrationTestReconciler) executeSequential(ctx context.Context, it *i
 	stepStatus := r.ensureStepStatus(&it.Status, currentIdx, step)
 
 	// 展开资源模板
-	resourceSpecs, err := r.expandStepResource(it, step)
+	manifest, err := r.expandStepResource(it, step)
 	if err != nil {
-		setStepFailed(&it.Status, stepStatus, step.Name, framework.ReasonFailed, fmt.Sprintf("expand manifests failed: %v", err))
+		setStepFailed(&it.Status, stepStatus, step.Name, framework.ReasonFailed, fmt.Sprintf("expand manifest failed: %v", err))
 		// 先 patch，成功后再发 Event
 		if patchErr := r.patchStatus(ctx, it, it.Status); patchErr != nil {
 			return ctrl.Result{}, patchErr
 		}
-		framework.EmitWarningEvent(r.Recorder, it, EventReasonStepFailed, fmt.Sprintf("[Round %d] 步骤 %d 扩展资源失败: %s - %s", it.Status.CurrentRound, currentIdx+1, step.Name, err.Error()))
+		framework.EmitWarningEvent(r.Recorder, it, framework.EventReasonStepFailed, fmt.Sprintf("[Round %d] 步骤 %d 扩展资源失败: %s - %s", it.Status.CurrentRound, currentIdx+1, step.Name, err.Error()))
 		return r.handleStepFailure(ctx, it)
 	}
 
@@ -49,13 +49,13 @@ func (r *IntegrationTestReconciler) executeSequential(ctx context.Context, it *i
 
 	// 1. 应用资源（仅首次执行）
 	if isFirstExecution {
-		if err := r.applyResources(ctx, it, resourceSpecs); err != nil {
+		if err := r.applyResource(ctx, it, manifest); err != nil {
 			setStepFailed(&it.Status, stepStatus, step.Name, framework.ReasonFailed, fmt.Sprintf("apply failed: %v", err))
 			// 先 patch，成功后再发 Event
 			if patchErr := r.patchStatus(ctx, it, it.Status); patchErr != nil {
 				return ctrl.Result{}, patchErr
 			}
-			framework.EmitWarningEvent(r.Recorder, it, EventReasonStepFailed, fmt.Sprintf("[Round %d] 步骤 %d 执行失败: %s - %s", it.Status.CurrentRound, currentIdx+1, step.Name, err.Error()))
+			framework.EmitWarningEvent(r.Recorder, it, framework.EventReasonStepFailed, fmt.Sprintf("[Round %d] 步骤 %d 执行失败: %s - %s", it.Status.CurrentRound, currentIdx+1, step.Name, err.Error()))
 			return r.handleStepFailure(ctx, it)
 		}
 		stepStatus.State = framework.StateRunning
@@ -63,26 +63,26 @@ func (r *IntegrationTestReconciler) executeSequential(ctx context.Context, it *i
 		if err := r.patchStatus(ctx, it, it.Status); err != nil {
 			return ctrl.Result{}, err
 		}
-		framework.EmitNormalEvent(r.Recorder, it, EventReasonStepStarted, fmt.Sprintf("[Round %d] 开始执行步骤 %d: %s", it.Status.CurrentRound, currentIdx+1, step.Name))
-		log.Info("resources applied", "step", step.Name)
+		framework.EmitNormalEvent(r.Recorder, it, framework.EventReasonStepStarted, fmt.Sprintf("[Round %d] 开始执行步骤 %d: %s", it.Status.CurrentRound, currentIdx+1, step.Name))
+		log.Info("resource applied", "step", step.Name)
 	}
 
 	// 2. 等待资源收敛
-	if err := r.waitResourcesConverge(ctx, resourceSpecs); err != nil {
+	if err := r.waitResourceConverge(ctx, manifest); err != nil {
 		log.Info("waiting for convergence", "step", step.Name)
 		return ctrl.Result{RequeueAfter: defaultRequeue}, nil
 	}
 
 	// 3. ReadyCondition（可选）
 	if step.ReadyCondition != nil {
-		result, err := r.checkStepReadyCondition(ctx, it, stepStatus, step, resourceSpecs)
+		result, err := r.checkStepReadyCondition(ctx, it, stepStatus, step, manifest)
 		if err != nil || result.RequeueAfter > 0 {
 			return result, err
 		}
 	}
 
 	// 4. 执行期望检查
-	return r.checkStepExpectations(ctx, it, stepStatus, step, resourceSpecs)
+	return r.checkStepExpectations(ctx, it, stepStatus, step, manifest)
 }
 
 // executeParallel 并行执行：所有步骤同时执行，全部完成后验证期望。
@@ -107,20 +107,20 @@ func (r *IntegrationTestReconciler) executeParallel(ctx context.Context, it *inf
 	}
 
 	// 1b. 展开所有步骤资源模板
-	stepResourceSpecs := make([][]resource.ExpandedManifest, len(steps))
+	stepManifests := make([]*resource.ExpandedManifest, len(steps))
 	for i, step := range steps {
-		specs, err := r.expandStepResource(it, step)
+		manifest, err := r.expandStepResource(it, step)
 		if err != nil {
 			stepStatus := &it.Status.Steps[i]
-			setStepFailed(&it.Status, stepStatus, step.Name, framework.ReasonFailed, fmt.Sprintf("expand manifests failed: %v", err))
+			setStepFailed(&it.Status, stepStatus, step.Name, framework.ReasonFailed, fmt.Sprintf("expand manifest failed: %v", err))
 			// 先 patch，成功后再发 Event
 			if patchErr := r.patchStatus(ctx, it, it.Status); patchErr != nil {
 				return ctrl.Result{}, patchErr
 			}
-			framework.EmitWarningEvent(r.Recorder, it, EventReasonStepFailed, fmt.Sprintf("[Round %d] 步骤 %d 扩展资源失败: %s - %s", it.Status.CurrentRound, i+1, step.Name, err.Error()))
+			framework.EmitWarningEvent(r.Recorder, it, framework.EventReasonStepFailed, fmt.Sprintf("[Round %d] 步骤 %d 扩展资源失败: %s - %s", it.Status.CurrentRound, i+1, step.Name, err.Error()))
 			return r.handleStepFailure(ctx, it)
 		}
-		stepResourceSpecs[i] = specs
+		stepManifests[i] = manifest
 	}
 
 	// 2. 并行应用所有步骤的资源
@@ -128,13 +128,13 @@ func (r *IntegrationTestReconciler) executeParallel(ctx context.Context, it *inf
 		stepStatus := &it.Status.Steps[i]
 		// 状态为空表示首次执行
 		if stepStatus.State == "" {
-			if err := r.applyResources(ctx, it, stepResourceSpecs[i]); err != nil {
+			if err := r.applyResource(ctx, it, stepManifests[i]); err != nil {
 				setStepFailed(&it.Status, stepStatus, step.Name, framework.ReasonFailed, fmt.Sprintf("apply failed: %v", err))
 				// 先 patch，成功后再发 Event
 				if patchErr := r.patchStatus(ctx, it, it.Status); patchErr != nil {
 					return ctrl.Result{}, patchErr
 				}
-				framework.EmitWarningEvent(r.Recorder, it, EventReasonStepFailed, fmt.Sprintf("[Round %d] 步骤 %d 执行失败: %s - %s", it.Status.CurrentRound, i+1, step.Name, err.Error()))
+				framework.EmitWarningEvent(r.Recorder, it, framework.EventReasonStepFailed, fmt.Sprintf("[Round %d] 步骤 %d 执行失败: %s - %s", it.Status.CurrentRound, i+1, step.Name, err.Error()))
 				return r.handleStepFailure(ctx, it)
 			}
 			stepStatus.State = framework.StateRunning
@@ -142,15 +142,15 @@ func (r *IntegrationTestReconciler) executeParallel(ctx context.Context, it *inf
 			if err := r.patchStatus(ctx, it, it.Status); err != nil {
 				return ctrl.Result{}, err
 			}
-			framework.EmitNormalEvent(r.Recorder, it, EventReasonStepStarted, fmt.Sprintf("[Round %d] 开始执行步骤 %d: %s", it.Status.CurrentRound, i+1, step.Name))
-			log.Info("resources applied", "step", step.Name)
+			framework.EmitNormalEvent(r.Recorder, it, framework.EventReasonStepStarted, fmt.Sprintf("[Round %d] 开始执行步骤 %d: %s", it.Status.CurrentRound, i+1, step.Name))
+			log.Info("resource applied", "step", step.Name)
 		}
 	}
 
 	// 3. 等待所有资源收敛
 	allConverged := true
 	for i, step := range steps {
-		if err := r.waitResourcesConverge(ctx, stepResourceSpecs[i]); err != nil {
+		if err := r.waitResourceConverge(ctx, stepManifests[i]); err != nil {
 			log.Info("waiting for convergence", "step", step.Name)
 			allConverged = false
 		}
@@ -172,7 +172,7 @@ func (r *IntegrationTestReconciler) executeParallel(ctx context.Context, it *inf
 			continue
 		}
 
-		result, stepPassed := r.checkParallelStepExpectations(ctx, it, stepStatus, step, stepResourceSpecs[i])
+		result, stepPassed := r.checkParallelStepExpectations(ctx, it, stepStatus, step, stepManifests[i])
 		if !stepPassed {
 			allPassed = false
 			if stepStatus.State == framework.StateFailed {
@@ -213,7 +213,7 @@ func (r *IntegrationTestReconciler) handleStepFailure(ctx context.Context, it *i
 		}
 	}
 	// 发送失败事件（状态已在调用方或上面 patch）
-	framework.EmitWarningEvent(r.Recorder, it, EventReasonIntegrationTestFailed, fmt.Sprintf("测试用例执行失败: %s", it.Status.Message))
+	framework.EmitWarningEvent(r.Recorder, it, framework.EventReasonIntegrationTestFailed, fmt.Sprintf("测试用例执行失败: %s", it.Status.Message))
 	return ctrl.Result{}, nil
 }
 

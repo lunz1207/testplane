@@ -70,7 +70,7 @@ func (r *IntegrationTestReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	r.ensureResourceManager()
 
 	if !it.DeletionTimestamp.IsZero() {
-		return r.handleDeletion(ctx, &it)
+		return framework.HandleDeletion(ctx, r.Client, &it, integrationTestFinalizer)
 	}
 
 	if !controllerutil.ContainsFinalizer(&it, integrationTestFinalizer) {
@@ -82,25 +82,6 @@ func (r *IntegrationTestReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		log.Error(err, "reconcile failed")
 	}
 	return res, err
-}
-
-// handleDeletion 处理删除：移除 finalizer。
-// 资源通过 ownerRef 关联，GC 会自动清理。
-func (r *IntegrationTestReconciler) handleDeletion(ctx context.Context, it *infrav1alpha1.IntegrationTest) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
-
-	if !controllerutil.ContainsFinalizer(it, integrationTestFinalizer) {
-		return ctrl.Result{}, nil
-	}
-
-	// 移除 finalizer，资源通过 ownerRef 由 GC 自动清理
-	controllerutil.RemoveFinalizer(it, integrationTestFinalizer)
-	if err := r.Update(ctx, it); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	log.Info("integrationtest deleted successfully")
-	return ctrl.Result{}, nil
 }
 
 func (r *IntegrationTestReconciler) reconcileNormal(ctx context.Context, it *infrav1alpha1.IntegrationTest) (ctrl.Result, error) {

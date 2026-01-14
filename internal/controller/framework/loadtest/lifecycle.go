@@ -38,14 +38,14 @@ func (r *LoadTestReconciler) initializeLoadTest(ctx context.Context, lt *infrav1
 	lt.Status.ObservedGeneration = lt.Generation
 
 	// 设置初始 Conditions
-	setCondition(&lt.Status, ConditionTypeReady, metav1.ConditionFalse, "Initializing", "LoadTest is initializing", lt.Generation)
-	setCondition(&lt.Status, ConditionTypeTargetReady, metav1.ConditionUnknown, "Pending", "Target readiness not yet checked", lt.Generation)
+	framework.SetCondition(&lt.Status.Conditions, ConditionTypeReady, metav1.ConditionFalse, "Initializing", "LoadTest is initializing", lt.Generation)
+	framework.SetCondition(&lt.Status.Conditions, ConditionTypeTargetReady, metav1.ConditionUnknown, "Pending", "Target readiness not yet checked", lt.Generation)
 
 	if err := framework.PatchStatusMerge(ctx, r.Client, lt); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	framework.EmitNormalEvent(r.Recorder, lt, EventReasonLoadTestStarted, "LoadTest started")
+	framework.EmitNormalEvent(r.Recorder, lt, framework.EventReasonLoadTestStarted, "LoadTest started")
 	return ctrl.Result{Requeue: true}, nil
 }
 
@@ -73,7 +73,7 @@ func (r *LoadTestReconciler) reconcileTerminal(ctx context.Context, lt *infrav1a
 
 		// 只在 Succeeded 状态下设置 Ready Condition 为 True
 		if lt.Status.Phase == infrav1alpha1.LoadTestSucceeded {
-			setCondition(&lt.Status, ConditionTypeReady, metav1.ConditionTrue, "Succeeded", "LoadTest completed successfully", lt.Generation)
+			framework.SetCondition(&lt.Status.Conditions, ConditionTypeReady, metav1.ConditionTrue, "Succeeded", "LoadTest completed successfully", lt.Generation)
 		}
 
 		if err := framework.PatchStatusMerge(ctx, r.Client, lt); err != nil {
@@ -82,7 +82,7 @@ func (r *LoadTestReconciler) reconcileTerminal(ctx context.Context, lt *infrav1a
 
 		// 只在 Succeeded 状态下发送成功事件
 		if lt.Status.Phase == infrav1alpha1.LoadTestSucceeded {
-			framework.EmitNormalEvent(r.Recorder, lt, EventReasonLoadTestSucceeded, "LoadTest completed successfully")
+			framework.EmitNormalEvent(r.Recorder, lt, framework.EventReasonLoadTestSucceeded, "LoadTest completed successfully")
 		}
 	}
 
@@ -99,13 +99,13 @@ func (r *LoadTestReconciler) setFailed(ctx context.Context, lt *infrav1alpha1.Lo
 	lt.Status.Message = message
 
 	// 设置 Ready Condition 为 False
-	setCondition(&lt.Status, ConditionTypeReady, metav1.ConditionFalse, reason, message, lt.Generation)
+	framework.SetCondition(&lt.Status.Conditions, ConditionTypeReady, metav1.ConditionFalse, reason, message, lt.Generation)
 
 	if err := framework.PatchStatusMerge(ctx, r.Client, lt); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	framework.EmitWarningEvent(r.Recorder, lt, EventReasonLoadTestFailed, message)
+	framework.EmitWarningEvent(r.Recorder, lt, framework.EventReasonLoadTestFailed, message)
 	// Failed 是终态，无需 Requeue
 	return ctrl.Result{}, nil
 }

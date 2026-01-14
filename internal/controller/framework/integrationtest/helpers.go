@@ -11,24 +11,9 @@ import (
 	"github.com/lunz1207/testplane/internal/controller/framework"
 )
 
-// Event 原因常量（IntegrationTest 特有）
-const (
-	// 测试生命周期
-	EventReasonIntegrationTestStarted   = "IntegrationTestStarted"
-	EventReasonIntegrationTestSucceeded = "IntegrationTestSucceeded"
-	EventReasonIntegrationTestFailed    = "IntegrationTestFailed"
-	EventReasonIntegrationTestTimeout   = "IntegrationTestTimeout"
-
-	// 步骤执行
-	EventReasonStepStarted   = "StepStarted"
-	EventReasonStepSucceeded = "StepSucceeded"
-	EventReasonStepFailed    = "StepFailed"
-)
-
 // patchStatus 使用纯正 SSA 更新 IntegrationTest 状态。
-// 构造干净的 Apply Configuration，不依赖 GET 到的对象。
-func (r *IntegrationTestReconciler) patchStatus(ctx context.Context, it *infrav1alpha1.IntegrationTest, status infrav1alpha1.IntegrationTestStatus) error {
-	return framework.PatchIntegrationTestStatus(ctx, r.Client, it.Name, it.Namespace, status)
+func (r *IntegrationTestReconciler) patchStatus(ctx context.Context, it *infrav1alpha1.IntegrationTest, _ infrav1alpha1.IntegrationTestStatus) error {
+	return framework.PatchIntegrationTestStatusFromObject(ctx, r.Client, it)
 }
 
 // ensureStepStatus 确保步骤状态存在并填充超时信息。
@@ -146,27 +131,10 @@ func (r *IntegrationTestReconciler) detectAndIgnoreSpecChange(_ context.Context,
 	}
 
 	// spec 已变更，设置 Condition 警告用户
-	condition := metav1.Condition{
-		Type:               ConditionTypeSpecChangedIgnored,
-		Status:             metav1.ConditionTrue,
-		ObservedGeneration: it.Generation,
-		LastTransitionTime: metav1.Now(),
-		Reason:             "SpecModified",
-		Message:            "spec was modified while integrationtest is running, changes are ignored",
-	}
-
-	// 更新或添加 Condition
-	found := false
-	for i := range it.Status.Conditions {
-		if it.Status.Conditions[i].Type == ConditionTypeSpecChangedIgnored {
-			it.Status.Conditions[i] = condition
-			found = true
-			break
-		}
-	}
-	if !found {
-		it.Status.Conditions = append(it.Status.Conditions, condition)
-	}
+	framework.SetCondition(&it.Status.Conditions, ConditionTypeSpecChangedIgnored,
+		metav1.ConditionTrue, "SpecModified",
+		"spec was modified while integrationtest is running, changes are ignored",
+		it.Generation)
 
 	return true
 }

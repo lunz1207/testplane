@@ -41,6 +41,35 @@ func ExpandResourceRef(ref infrav1alpha1.ResourceRef, defaultNamespace string) (
 	return expandRaw(ref.Manifest.Raw, defaultNamespace, action)
 }
 
+// ExpandSingleResourceRef 展开单个 ResourceRef 为单个 ExpandedManifest。
+// 如果 manifest 包含 List 或数组，返回错误。
+func ExpandSingleResourceRef(ref infrav1alpha1.ResourceRef, defaultNamespace string) (*ExpandedManifest, error) {
+	if len(ref.Manifest.Raw) == 0 {
+		return nil, fmt.Errorf("manifest is empty")
+	}
+
+	action := ref.Action
+	if action == "" {
+		action = infrav1alpha1.TemplateActionApply
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal(ref.Manifest.Raw, &data); err != nil {
+		return nil, fmt.Errorf("unmarshal template: %w", err)
+	}
+
+	// 检查是否是 List
+	if _, ok := data["items"]; ok {
+		return nil, fmt.Errorf("manifest contains list, expected single object")
+	}
+
+	manifest, err := toExpandedManifest(data, defaultNamespace, action)
+	if err != nil {
+		return nil, err
+	}
+	return &manifest, nil
+}
+
 // ExpandResourceRefs 展开多个 ResourceRef（支持 List/数组）。
 // replacements 用于对模板内容进行占位符替换（用于 workload 注入）。
 func ExpandResourceRefs(refs []infrav1alpha1.ResourceRef, defaultNamespace string, replacements map[string]string) ([]ExpandedManifest, error) {
