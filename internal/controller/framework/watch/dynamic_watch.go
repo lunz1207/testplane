@@ -20,7 +20,6 @@ package watch
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -54,32 +53,31 @@ func (t WatchTarget) String() string {
 }
 
 // DynamicWatchManager manages dynamic watches for test resources.
-// When watched resources change, it triggers reconciliation of the corresponding IntegrationTest.
+// When watched resources change, it uses OwnerReference to find the associated
+// IntegrationTest and triggers reconciliation.
 type DynamicWatchManager struct {
 	cache  cache.Cache
 	client client.Client
 
 	mu sync.RWMutex
-	// testKey (namespace/name) -> set of resourceKeys being watched
-	watchedResources map[string]map[string]struct{}
-	// resourceKey -> testKey (reverse mapping for triggering reconcile)
-	resourceToTest map[string]string
-	// registered GVKs (to avoid duplicate informer handlers)
+	// activeTests tracks which tests are currently waiting for assertions.
+	// Key format: "namespace/name"
+	activeTests map[string]struct{}
+	// registeredGVKs tracks which GVKs have informer handlers registered.
 	registeredGVKs map[schema.GroupVersionKind]bool
 
-	// eventChan is used to send events to trigger reconciles
+	// eventChan is used to send events to trigger reconciles.
 	eventChan chan event.TypedGenericEvent[*infrav1alpha1.IntegrationTest]
 }
 
 // NewDynamicWatchManager creates a new DynamicWatchManager.
 func NewDynamicWatchManager(c cache.Cache, cli client.Client) *DynamicWatchManager {
 	return &DynamicWatchManager{
-		cache:            c,
-		client:           cli,
-		watchedResources: make(map[string]map[string]struct{}),
-		resourceToTest:   make(map[string]string),
-		registeredGVKs:   make(map[schema.GroupVersionKind]bool),
-		eventChan:        make(chan event.TypedGenericEvent[*infrav1alpha1.IntegrationTest], 1024),
+		cache:          c,
+		client:         cli,
+		activeTests:    make(map[string]struct{}),
+		registeredGVKs: make(map[schema.GroupVersionKind]bool),
+		eventChan:      make(chan event.TypedGenericEvent[*infrav1alpha1.IntegrationTest], 1024),
 	}
 }
 
@@ -89,25 +87,19 @@ func (m *DynamicWatchManager) EventSource() source.Source {
 	return source.Channel(m.eventChan, &handler.TypedEnqueueRequestForObject[*infrav1alpha1.IntegrationTest]{})
 }
 
-// StartWatch starts watching the specified resources for an IntegrationTest.
-// When any watched resource changes, the IntegrationTest will be enqueued for reconciliation.
+// StartWatch registers the test as active and ensures informer handlers are registered
+// for the target resource GVKs. When these resources change, the manager will use
+// OwnerReference to find the associated IntegrationTest and trigger reconciliation.
 func (m *DynamicWatchManager) StartWatch(ctx context.Context, namespace, testName string, targets []WatchTarget) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Mark test as active
 	testKey := m.testKey(namespace, testName)
-	if m.watchedResources[testKey] == nil {
-		m.watchedResources[testKey] = make(map[string]struct{})
-	}
+	m.activeTests[testKey] = struct{}{}
 
+	// Ensure informer handlers are registered for all target GVKs
 	for _, target := range targets {
-		resourceKey := target.String()
-
-		// Record the mapping
-		m.watchedResources[testKey][resourceKey] = struct{}{}
-		m.resourceToTest[resourceKey] = testKey
-
-		// Ensure informer handler is registered for this GVK
 		if err := m.ensureInformerHandler(ctx, target.GVK); err != nil {
 			log.Error(err, "failed to register informer handler", "gvk", target.GVK)
 			// Continue with other targets, don't fail completely
@@ -119,29 +111,25 @@ func (m *DynamicWatchManager) StartWatch(ctx context.Context, namespace, testNam
 	return nil
 }
 
-// StopWatch stops watching resources for an IntegrationTest.
+// StopWatch marks the test as inactive.
 func (m *DynamicWatchManager) StopWatch(namespace, testName string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	testKey := m.testKey(namespace, testName)
-	resources := m.watchedResources[testKey]
-	for resourceKey := range resources {
-		delete(m.resourceToTest, resourceKey)
-	}
-	delete(m.watchedResources, testKey)
+	delete(m.activeTests, testKey)
 
 	log.V(1).Info("stopped watch", "test", testKey)
 }
 
-// IsWatching checks if the test is currently being watched.
+// IsWatching checks if the test is currently active (waiting for assertions).
 func (m *DynamicWatchManager) IsWatching(namespace, testName string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	testKey := m.testKey(namespace, testName)
-	resources, exists := m.watchedResources[testKey]
-	return exists && len(resources) > 0
+	_, exists := m.activeTests[testKey]
+	return exists
 }
 
 // ensureInformerHandler ensures an event handler is registered for the GVK.
@@ -172,6 +160,7 @@ func (m *DynamicWatchManager) ensureInformerHandler(ctx context.Context, gvk sch
 }
 
 // onResourceChange handles resource change events.
+// It uses OwnerReference to find the associated IntegrationTest and triggers reconcile.
 func (m *DynamicWatchManager) onResourceChange(obj interface{}) {
 	u, ok := obj.(*unstructured.Unstructured)
 	if !ok {
@@ -186,50 +175,53 @@ func (m *DynamicWatchManager) onResourceChange(obj interface{}) {
 		}
 	}
 
+	// Find IntegrationTest via OwnerReference
+	namespace, testName := m.findOwnerIntegrationTest(u)
+	if testName == "" {
+		return
+	}
+
+	// Check if this test is active
+	testKey := m.testKey(namespace, testName)
 	m.mu.RLock()
-	resourceKey := m.resourceKeyFromObject(u)
-	testKey, exists := m.resourceToTest[resourceKey]
+	_, isActive := m.activeTests[testKey]
 	m.mu.RUnlock()
 
-	if !exists {
+	if !isActive {
 		return
 	}
 
 	// Trigger reconcile by sending an event
-	namespace, name := m.splitTestKey(testKey)
-
-	// Create a minimal IntegrationTest object for the event
 	it := &infrav1alpha1.IntegrationTest{}
 	it.SetNamespace(namespace)
-	it.SetName(name)
+	it.SetName(testName)
 
 	// Non-blocking send to avoid blocking the informer
 	select {
 	case m.eventChan <- event.TypedGenericEvent[*infrav1alpha1.IntegrationTest]{Object: it}:
-		log.V(1).Info("triggered reconcile", "test", testKey, "resource", resourceKey)
+		log.V(1).Info("triggered reconcile via OwnerReference",
+			"test", testKey,
+			"resource", fmt.Sprintf("%s/%s", u.GetKind(), u.GetName()))
 	default:
-		log.V(1).Info("event channel full, reconcile will be triggered by next event or fallback requeue", "test", testKey)
+		log.V(1).Info("event channel full, reconcile will be triggered by next event or fallback requeue",
+			"test", testKey)
 	}
+}
+
+// findOwnerIntegrationTest finds the IntegrationTest that owns this resource.
+// Returns (namespace, name) of the IntegrationTest, or ("", "") if not found.
+func (m *DynamicWatchManager) findOwnerIntegrationTest(u *unstructured.Unstructured) (namespace, name string) {
+	for _, owner := range u.GetOwnerReferences() {
+		if owner.Kind == "IntegrationTest" && owner.APIVersion == infrav1alpha1.GroupVersion.String() {
+			return u.GetNamespace(), owner.Name
+		}
+	}
+	return "", ""
 }
 
 // testKey generates a unique key for an IntegrationTest.
 func (m *DynamicWatchManager) testKey(namespace, name string) string {
 	return fmt.Sprintf("%s/%s", namespace, name)
-}
-
-// splitTestKey splits a testKey into namespace and name.
-func (m *DynamicWatchManager) splitTestKey(testKey string) (namespace, name string) {
-	parts := strings.SplitN(testKey, "/", 2)
-	if len(parts) == 2 {
-		return parts[0], parts[1]
-	}
-	return "", testKey
-}
-
-// resourceKeyFromObject generates a resourceKey from an unstructured object.
-func (m *DynamicWatchManager) resourceKeyFromObject(u *unstructured.Unstructured) string {
-	gvk := u.GroupVersionKind()
-	return fmt.Sprintf("%s/%s/%s/%s", gvk.Group, gvk.Kind, u.GetNamespace(), u.GetName())
 }
 
 // GetEventChannel returns the event channel for testing purposes.
