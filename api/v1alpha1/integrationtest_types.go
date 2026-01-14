@@ -132,48 +132,6 @@ type StepStatus struct {
 	ReadyConditionStatus *ReadyConditionStatus `json:"readyConditionStatus,omitempty"`
 }
 
-// RoundSummary 记录单轮执行的摘要信息。
-type RoundSummary struct {
-	// Round 轮次号（从 1 开始）。
-	Round int `json:"round"`
-	// StartedAt 轮次开始时间。
-	StartedAt *metav1.Time `json:"startedAt,omitempty"`
-	// FinishedAt 轮次结束时间。
-	FinishedAt *metav1.Time `json:"finishedAt,omitempty"`
-	// Succeeded 是否成功。
-	Succeeded bool `json:"succeeded"`
-	// FailedStep 失败的步骤名称（如果有）。
-	FailedStep string `json:"failedStep,omitempty"`
-	// StepCount 步骤总数。
-	StepCount int `json:"stepCount,omitempty"`
-	// SucceededSteps 成功的步骤数。
-	SucceededSteps int `json:"succeededSteps,omitempty"`
-	// DurationSeconds 轮次执行时长（秒）。
-	DurationSeconds int32 `json:"durationSeconds,omitempty"`
-}
-
-// AggregateStats 聚合统计信息（用于长时间运行的测试）。
-type AggregateStats struct {
-	// TotalSteps 所有轮次的总步骤数。
-	TotalSteps int `json:"totalSteps,omitempty"`
-	// TotalSucceededSteps 所有轮次成功的步骤总数。
-	TotalSucceededSteps int `json:"totalSucceededSteps,omitempty"`
-	// TotalFailedSteps 所有轮次失败的步骤总数。
-	TotalFailedSteps int `json:"totalFailedSteps,omitempty"`
-	// SucceededRounds 成功的轮次数。
-	SucceededRounds int `json:"succeededRounds,omitempty"`
-	// FailedRounds 失败的轮次数。
-	FailedRounds int `json:"failedRounds,omitempty"`
-	// TotalDurationSeconds 所有轮次的总执行时长（秒），用于计算平均值。
-	TotalDurationSeconds int64 `json:"totalDurationSeconds,omitempty"`
-	// MinDurationSeconds 最短轮次执行时长（秒）。
-	MinDurationSeconds int32 `json:"minDurationSeconds,omitempty"`
-	// MaxDurationSeconds 最长轮次执行时长（秒）。
-	MaxDurationSeconds int32 `json:"maxDurationSeconds,omitempty"`
-	// LastUpdated 最后更新时间。
-	LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
-}
-
 // IntegrationTestStatus 记录测试用例的状态和报告。
 type IntegrationTestStatus struct {
 	// Phase 测试阶段。
@@ -196,10 +154,6 @@ type IntegrationTestStatus struct {
 	CompletedRounds int `json:"completedRounds,omitempty"`
 	// Steps 步骤状态详情（当前轮次）。
 	Steps []StepStatus `json:"steps,omitempty"`
-	// RoundHistory 历史轮次摘要（保留最近 10 轮）。
-	RoundHistory []RoundSummary `json:"roundHistory,omitempty"`
-	// AggregateStats 所有轮次的聚合统计（长时间运行测试使用）。
-	AggregateStats *AggregateStats `json:"aggregateStats,omitempty"`
 	// Conditions 条件列表。
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }

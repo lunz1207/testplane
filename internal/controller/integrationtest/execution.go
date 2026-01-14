@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -98,9 +97,6 @@ func (r *IntegrationTestReconciler) startNextRound(ctx context.Context, it *infr
 
 	// 避免重复增加 CompletedRounds（轮间延迟返回后会再次进入此函数）
 	if len(it.Status.Steps) > 0 {
-		// 保存当前轮次摘要到历史
-		saveRoundSummary(&it.Status)
-
 		it.Status.CompletedRounds++
 		logging.RoundCompleted(log, it.Status.CurrentRound)
 
@@ -131,104 +127,4 @@ func (r *IntegrationTestReconciler) startNextRound(ctx context.Context, it *infr
 
 	logging.RoundStarted(log, it.Status.CurrentRound)
 	return ctrl.Result{Requeue: true}, nil
-}
-
-// saveRoundSummary 保存当前轮次摘要到历史（保留最近 10 轮）并更新聚合统计。
-func saveRoundSummary(status *infrav1alpha1.IntegrationTestStatus) {
-	if len(status.Steps) == 0 {
-		return
-	}
-
-	// 计算摘要信息
-	var succeededSteps int
-	var failedStep string
-	var startedAt, finishedAt *time.Time
-
-	for _, step := range status.Steps {
-		if step.State == shared.StateSucceeded {
-			succeededSteps++
-		} else if step.State == shared.StateFailed && failedStep == "" {
-			failedStep = step.Name
-		}
-		if step.StartedAt != nil && (startedAt == nil || step.StartedAt.Time.Before(*startedAt)) {
-			t := step.StartedAt.Time
-			startedAt = &t
-		}
-		if step.FinishedAt != nil && (finishedAt == nil || step.FinishedAt.After(*finishedAt)) {
-			t := step.FinishedAt.Time
-			finishedAt = &t
-		}
-	}
-
-	// 计算执行时长
-	var durationSeconds int32
-	if startedAt != nil && finishedAt != nil {
-		durationSeconds = int32(finishedAt.Sub(*startedAt).Seconds())
-	}
-
-	summary := infrav1alpha1.RoundSummary{
-		Round:           status.CurrentRound,
-		Succeeded:       succeededSteps == len(status.Steps),
-		FailedStep:      failedStep,
-		StepCount:       len(status.Steps),
-		SucceededSteps:  succeededSteps,
-		DurationSeconds: durationSeconds,
-	}
-	if startedAt != nil {
-		t := metav1.NewTime(*startedAt)
-		summary.StartedAt = &t
-	}
-	if finishedAt != nil {
-		t := metav1.NewTime(*finishedAt)
-		summary.FinishedAt = &t
-	}
-
-	// 更新聚合统计
-	updateAggregateStats(status, &summary)
-
-	// 保留最近 10 轮
-	const maxRoundHistory = 10
-	status.RoundHistory = append(status.RoundHistory, summary)
-	if len(status.RoundHistory) > maxRoundHistory {
-		status.RoundHistory = status.RoundHistory[len(status.RoundHistory)-maxRoundHistory:]
-	}
-}
-
-// updateAggregateStats 更新聚合统计信息。
-func updateAggregateStats(status *infrav1alpha1.IntegrationTestStatus, summary *infrav1alpha1.RoundSummary) {
-	if status.AggregateStats == nil {
-		status.AggregateStats = &infrav1alpha1.AggregateStats{}
-	}
-
-	stats := status.AggregateStats
-
-	// 更新步骤计数
-	stats.TotalSteps += summary.StepCount
-	stats.TotalSucceededSteps += summary.SucceededSteps
-	stats.TotalFailedSteps += summary.StepCount - summary.SucceededSteps
-
-	// 更新轮次计数
-	if summary.Succeeded {
-		stats.SucceededRounds++
-	} else {
-		stats.FailedRounds++
-	}
-
-	// 更新时长统计
-	if summary.DurationSeconds > 0 {
-		// 累计总时长（用于外部计算平均值）
-		stats.TotalDurationSeconds += int64(summary.DurationSeconds)
-
-		// 更新最小/最大时长
-		if stats.MinDurationSeconds == 0 || summary.DurationSeconds < stats.MinDurationSeconds {
-			stats.MinDurationSeconds = summary.DurationSeconds
-		}
-		if summary.DurationSeconds > stats.MaxDurationSeconds {
-			stats.MaxDurationSeconds = summary.DurationSeconds
-		}
-	}
-
-	// 更新时间戳
-	now := metav1.Now()
-	stats.LastUpdated = &now
 }

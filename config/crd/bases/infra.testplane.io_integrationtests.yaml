@@ -289,41 +289,6 @@ spec:
           status:
             description: IntegrationTestStatus 记录测试用例的状态和报告。
             properties:
-              aggregateStats:
-                description: AggregateStats 所有轮次的聚合统计（长时间运行测试使用）。
-                properties:
-                  failedRounds:
-                    description: FailedRounds 失败的轮次数。
-                    type: integer
-                  lastUpdated:
-                    description: LastUpdated 最后更新时间。
-                    format: date-time
-                    type: string
-                  maxDurationSeconds:
-                    description: MaxDurationSeconds 最长轮次执行时长（秒）。
-                    format: int32
-                    type: integer
-                  minDurationSeconds:
-                    description: MinDurationSeconds 最短轮次执行时长（秒）。
-                    format: int32
-                    type: integer
-                  succeededRounds:
-                    description: SucceededRounds 成功的轮次数。
-                    type: integer
-                  totalDurationSeconds:
-                    description: TotalDurationSeconds 所有轮次的总执行时长（秒），用于计算平均值。
-                    format: int64
-                    type: integer
-                  totalFailedSteps:
-                    description: TotalFailedSteps 所有轮次失败的步骤总数。
-                    type: integer
-                  totalSteps:
-                    description: TotalSteps 所有轮次的总步骤数。
-                    type: integer
-                  totalSucceededSteps:
-                    description: TotalSucceededSteps 所有轮次成功的步骤总数。
-                    type: integer
-                type: object
               completedRounds:
                 description: CompletedRounds 已完成的轮次数。
                 type: integer
@@ -413,43 +378,6 @@ spec:
               reason:
                 description: Reason 阶段原因（如 StepFailed、InitialConditionNotMet、Timeout）。
                 type: string
-              roundHistory:
-                description: RoundHistory 历史轮次摘要（保留最近 10 轮）。
-                items:
-                  description: RoundSummary 记录单轮执行的摘要信息。
-                  properties:
-                    durationSeconds:
-                      description: DurationSeconds 轮次执行时长（秒）。
-                      format: int32
-                      type: integer
-                    failedStep:
-                      description: FailedStep 失败的步骤名称（如果有）。
-                      type: string
-                    finishedAt:
-                      description: FinishedAt 轮次结束时间。
-                      format: date-time
-                      type: string
-                    round:
-                      description: Round 轮次号（从 1 开始）。
-                      type: integer
-                    startedAt:
-                      description: StartedAt 轮次开始时间。
-                      format: date-time
-                      type: string
-                    stepCount:
-                      description: StepCount 步骤总数。
-                      type: integer
-                    succeeded:
-                      description: Succeeded 是否成功。
-                      type: boolean
-                    succeededSteps:
-                      description: SucceededSteps 成功的步骤数。
-                      type: integer
-                  required:
-                  - round
-                  - succeeded
-                  type: object
-                type: array
               startTime:
                 description: StartTime 开始时间。
                 format: date-time
