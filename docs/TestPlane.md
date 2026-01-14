@@ -412,6 +412,7 @@ spec:
         - function: ResourceExists
 
   workload:
+    # 从 Target 提取值，注入到 Pod annotations
     envInjection:
       - name: TARGET_HOST
         extract:
@@ -440,8 +441,11 @@ spec:
                     - name: load
                       image: load-test:latest
                       env:
-                        - name: TARGET_URL
-                          value: "${TARGET_HOST}"
+                        # 通过 Downward API 引用注入的 annotation
+                        - name: TARGET_HOST
+                          valueFrom:
+                            fieldRef:
+                              fieldPath: metadata.annotations['testplane.io/inject-target-host']
 
   # 运行期断言（默认检查 target 资源）
   expectations:

@@ -347,21 +347,22 @@ expectations:
 
 ### 添加新的 Extractor 函数
 
-1. 在 `internal/controller/framework/plugin/` 中创建提取函数：
+1. 在 `internal/builtins/extraction.go` 中创建提取函数：
 
 ```go
-func MyExtractor(s Snapshot, p Params) string {
-    return s.Status().String("someField")
+func MyExtractor(resource, params map[string]interface{}) plugin.Result {
+    value := plugin.GetNestedString(resource, "status", "someField")
+    return plugin.Extract(value)
 }
 ```
 
-2. 注册到 Extractor Registry：
+2. 在 `internal/builtins/register.go` 中注册：
 
 ```go
-extractorRegistry.Register("MyExtractor", MyExtractor)
+r.Register("MyExtractor", MyExtractor)
 ```
 
-3. 在 LoadTest 中使用：
+3. 在 LoadTest 中使用（提取的值会注入到 Pod annotations）：
 
 ```yaml
 workload:
@@ -371,7 +372,22 @@ workload:
         function: MyExtractor
         params:
           key: value
+  resources:
+    - manifest:
+        # ... Pod/Deployment 模板
+        spec:
+          containers:
+            - env:
+                - name: MY_VAR
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.annotations['testplane.io/inject-my-var']
 ```
+
+**注入机制说明**：
+- Controller 从 Target 资源提取值，写入 Workload Pod template 的 annotations
+- Annotation key 格式：`testplane.io/inject-{name}`（name 转为 kebab-case）
+- 用户通过 Kubernetes Downward API 引用这些 annotations 作为环境变量
 
 ## 项目结构
 
@@ -397,8 +413,8 @@ workload:
 │       ├── loadtest/                # LoadTest 控制器
 │       │   ├── loadtest_controller.go
 │       │   ├── target.go            # Target 处理
-│       │   ├── workload.go          # Workload 应用
-│       │   ├── injection.go         # 环境变量注入
+│       │   ├── workload.go          # Workload 应用与 annotation 注入
+│       │   ├── injection.go         # 值提取
 │       │   └── running.go           # 运行期断言检查
 │       └── resource/                # 资源管理
 │           ├── manager.go           # 资源应用/删除/等待

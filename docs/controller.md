@@ -221,40 +221,52 @@ step.TimeoutSeconds (默认 600s)
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 环境变量注入
+### 值提取与 Annotation 注入
+
+Controller 从 Target 资源提取值，并注入到 Workload Pod template 的 annotations 中。
+用户通过 Kubernetes Downward API 引用这些 annotations 作为环境变量。
 
 ```yaml
 workload:
   envInjection:
-    - name: TARGET_HOST
+    - name: TARGET_HOST        # 生成 annotation: testplane.io/inject-target-host
       extract:
         function: FieldPath
         params:
           path: status.endpoint
+  resources:
+    - manifest:
+        # ... Deployment 模板
+        spec:
+          template:
+            spec:
+              containers:
+                - env:
+                    - name: TARGET_HOST
+                      valueFrom:
+                        fieldRef:
+                          fieldPath: metadata.annotations['testplane.io/inject-target-host']
 ```
 
 **执行流程**：
 
 ```go
-func (r *Reconciler) resolveInjections(ctx, lt, target) (map[string]string, error) {
+// 1. 从 Target 提取值
+func (r *Reconciler) resolveEnvInjection(target, injections) (map[string]string, error) {
     values := make(map[string]string)
-
-    for _, injection := range lt.Spec.Workload.EnvInjection {
-        // 1. 获取 Extractor 函数
-        fn := extractorRegistry.Get(injection.Extract.Function)
-
-        // 2. 构建 Snapshot
-        snapshot := NewSnapshot(target.Object)
-
-        // 3. 解析参数
-        params := NewParams(injection.Extract.Params)
-
-        // 4. 执行提取
-        value := fn(snapshot, params)
-        values[injection.Name] = value
+    for _, inj := range injections {
+        result, _ := r.PluginRegistry.Call(inj.Extract.Function, target.Object, inj.Extract.Params.Raw)
+        values[inj.Name] = result.Value
     }
-
     return values, nil
+}
+
+// 2. 注入到 Pod template annotations
+func injectAnnotationsToWorkload(obj *unstructured.Unstructured, values map[string]string) error {
+    // 将 TARGET_HOST → testplane.io/inject-target-host
+    // 根据资源类型设置到正确的 annotation 路径
+    // Deployment: spec.template.metadata.annotations
+    // Pod: metadata.annotations
 }
 ```
 
