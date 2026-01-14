@@ -69,7 +69,8 @@ spec:
   mode: Sequential
   steps:
     - name: create-deployment
-      template:
+      timeoutSeconds: 300
+      resource:
         manifest:
           apiVersion: apps/v1
           kind: Deployment
@@ -89,7 +90,6 @@ spec:
                   - name: nginx
                     image: nginx:latest
       expectations:
-        timeoutSeconds: 300
         allOf:
           - function: ResourceExists
 ```
@@ -118,26 +118,27 @@ kind: LoadTest
 metadata:
   name: app-load-test
 spec:
-  # 测试目标（Template 或 Selector 二选一）
+  # 测试目标（Manifest 或 Selector 二选一）
   target:
-    template:
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: target-app
-      spec:
-        replicas: 3
-        selector:
-          matchLabels:
-            app: target-app
-        template:
-          metadata:
-            labels:
+    resource:
+      manifest:
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: target-app
+        spec:
+          replicas: 3
+          selector:
+            matchLabels:
               app: target-app
-          spec:
-            containers:
-              - name: app
-                image: myapp:latest
+          template:
+            metadata:
+              labels:
+                app: target-app
+            spec:
+              containers:
+                - name: app
+                  image: myapp:latest
     readyCondition:
       timeoutSeconds: 300
       allOf:
@@ -146,28 +147,27 @@ spec:
   # 负载定义
   workload:
     resources:
-      templates:
-        - template:
-            apiVersion: apps/v1
-            kind: Deployment
-            metadata:
-              name: load-generator
-            spec:
-              replicas: 1
-              selector:
-                matchLabels:
+      - manifest:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: load-generator
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: load-generator
+            template:
+              metadata:
+                labels:
                   app: load-generator
-              template:
-                metadata:
-                  labels:
-                    app: load-generator
-                spec:
-                  containers:
-                    - name: load-generator
-                      image: load-test:latest
+              spec:
+                containers:
+                  - name: load-generator
+                    image: load-test:latest
 
-  # 运行期断言（周期性检查，默认检查 target 资源）
-  expectations:
+  # 健康检查（周期性检查，默认检查 target 资源）
+  healthCheck:
     intervalSeconds: 30
     failureThreshold: 3
     allOf:
@@ -270,25 +270,28 @@ spec:
 
 ### 断言配置
 
-#### WaitCondition（统一断言配置）
+TestPlane 使用不同的条件类型来配置断言：
 
-WaitCondition 支持两种模式：
-- **超时模式**：用于 IntegrationTest 步骤/最终断言，通过 `timeoutSeconds` 配置
-- **周期模式**：用于 LoadTest 运行期断言，通过 `intervalSeconds` + `failureThreshold` 配置
+- **StepCondition**：用于 IntegrationTest 步骤的 `readyCondition` 和 `expectations`
+- **ReadyCondition**：用于 LoadTest 的 `target.readyCondition`，通过 `timeoutSeconds` 配置
+- **HealthCheck**：用于 LoadTest 运行期周期性检查，通过 `intervalSeconds` + `failureThreshold` 配置
 
 ```yaml
-# IntegrationTest 步骤/最终断言（超时模式）
-expectations:
-  timeoutSeconds: 300          # 超时时间（秒）
-  allOf:                       # 所有期望都必须满足
-    - function: ResourceExists
-  anyOf:                       # 任一期望满足即可
-    - function: ResourceExists
+# IntegrationTest 步骤断言（StepCondition）
+steps:
+  - name: my-step
+    timeoutSeconds: 300        # 步骤总超时时间
+    expectations:
+      timeoutSeconds: 10       # 单次检查超时时间（秒）
+      allOf:                   # 所有期望都必须满足
+        - function: ResourceExists
+      anyOf:                   # 任一期望满足即可
+        - function: ResourceExists
 ```
 
 ```yaml
-# LoadTest 运行期断言（周期模式）
-expectations:
+# LoadTest 健康检查（HealthCheck - 周期模式）
+healthCheck:
   intervalSeconds: 30          # 检查间隔（秒）
   failureThreshold: 3          # 连续失败阈值
   allOf:
@@ -315,24 +318,31 @@ make manifests generate
 
 ### 添加新的期望函数
 
-1. 在 `internal/controller/framework/plugin/` 中创建期望函数：
+1. 在 `internal/builtins/` 中创建期望函数（如 `custom.go`）：
 
 ```go
-func MyExpect(s Snapshot, p Params) Result {
-    expected := p.String("expected")
-    actual := s.Status().String("myField")
+package builtins
 
-    return Check(actual == expected).
-        Expected(expected).
-        Actual(actual).
-        Result()
+import "github.com/lunz1207/testplane/internal/plugin"
+
+// MyExpect 检查自定义条件
+func MyExpect(resource, params map[string]interface{}) plugin.Result {
+    expected := plugin.GetString(params, "expected")
+    actual := plugin.GetNestedString(resource, "status", "myField")
+
+    if actual == expected {
+        return plugin.Pass()
+    }
+    return plugin.Fail("value mismatch").WithActual(actual)
 }
 ```
 
-2. 在 `internal/controller/framework/plugin/builtin.go` 中注册：
+2. 在 `internal/builtins/register.go` 中注册：
 
 ```go
-registry.Register("MyExpect", MyExpect)
+func RegisterCustom(r *plugin.Registry) {
+    r.Register("MyExpect", MyExpect)
+}
 ```
 
 3. 在 Case YAML 中使用：
@@ -350,16 +360,20 @@ expectations:
 1. 在 `internal/builtins/extraction.go` 中创建提取函数：
 
 ```go
+// MyExtractor 从资源中提取自定义字段
 func MyExtractor(resource, params map[string]interface{}) plugin.Result {
     value := plugin.GetNestedString(resource, "status", "someField")
     return plugin.Extract(value)
 }
 ```
 
-2. 在 `internal/builtins/register.go` 中注册：
+2. 在 `internal/builtins/register.go` 的 `RegisterExtraction` 函数中注册：
 
 ```go
-r.Register("MyExtractor", MyExtractor)
+func RegisterExtraction(r *plugin.Registry) {
+    // ... 其他注册
+    r.Register("MyExtractor", MyExtractor)
+}
 ```
 
 3. 在 LoadTest 中使用（提取的值会注入到 Pod annotations）：
@@ -376,12 +390,14 @@ workload:
     - manifest:
         # ... Pod/Deployment 模板
         spec:
-          containers:
-            - env:
-                - name: MY_VAR
-                  valueFrom:
-                    fieldRef:
-                      fieldPath: metadata.annotations['testplane.io/inject-my-var']
+          template:
+            spec:
+              containers:
+                - env:
+                    - name: MY_VAR
+                      valueFrom:
+                        fieldRef:
+                          fieldPath: metadata.annotations['testplane.io/inject-my-var']
 ```
 
 **注入机制说明**：
@@ -393,32 +409,44 @@ workload:
 
 ```
 ├── api/v1alpha1/                    # CRD 类型定义
-│   ├── common_types.go              # 共用类型（Expectation、ResourceSelector 等）
+│   ├── expectation_types.go         # 断言相关类型（Expectation、Extractor、ExpectationResult）
+│   ├── resource_types.go            # 资源相关类型（ResourceSelector、ResourceRef）
+│   ├── status_types.go              # 状态相关类型（ReadyConditionStatus）
 │   ├── integrationtest_types.go     # IntegrationTest CRD
 │   └── loadtest_types.go            # LoadTest CRD
 ├── cmd/                             # 程序入口
-├── internal/controller/
-│   └── framework/                   # 测试框架
-│       ├── expectation_runner.go    # 期望执行引擎
-│       ├── plugin/                  # 期望函数插件
-│       │   ├── functions.go         # 期望函数实现
-│       │   ├── builtin.go           # 内置函数注册
-│       │   ├── registry.go          # 函数注册表
-│       │   └── result.go            # 结果类型
+├── internal/
+│   ├── plugin/                      # 插件框架
+│   │   ├── registry.go              # 函数注册表
+│   │   ├── result.go                # 结果类型
+│   │   └── helpers.go               # 辅助函数
+│   ├── builtins/                    # 内置函数实现
+│   │   ├── register.go              # 内置函数注册
+│   │   ├── cluster.go               # Cluster 断言函数
+│   │   ├── instance.go              # Instance 断言函数
+│   │   ├── k8s.go                   # Kubernetes 资源就绪检查
+│   │   ├── common.go                # 通用断言函数
+│   │   └── extraction.go            # 提取函数（用于 EnvInjection）
+│   └── controller/
 │       ├── integrationtest/         # IntegrationTest 控制器
 │       │   ├── integrationtest_controller.go
 │       │   ├── execution.go         # 执行逻辑（顺序/并行）
 │       │   ├── step_runner.go       # 步骤执行器
+│       │   ├── step_expectation.go  # 步骤期望检查
 │       │   └── lifecycle.go         # 生命周期管理
 │       ├── loadtest/                # LoadTest 控制器
 │       │   ├── loadtest_controller.go
 │       │   ├── target.go            # Target 处理
 │       │   ├── workload.go          # Workload 应用与 annotation 注入
 │       │   ├── injection.go         # 值提取
-│       │   └── running.go           # 运行期断言检查
-│       └── resource/                # 资源管理
-│           ├── manager.go           # 资源应用/删除/等待
-│           └── template.go          # 资源模板展开
+│       │   └── running.go           # 运行期健康检查
+│       └── shared/                  # 共享组件
+│           ├── expectation_runner.go # 期望执行引擎
+│           ├── events.go            # 事件常量与工具
+│           ├── status.go            # 状态更新工具
+│           └── resource/            # 资源管理
+│               ├── manager.go       # 资源应用/删除/等待
+│               └── template.go      # 资源模板展开
 ├── config/
 │   ├── crd/bases/                   # 生成的 CRD YAML
 │   └── samples/                     # 示例 CR

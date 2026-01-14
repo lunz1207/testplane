@@ -5,7 +5,7 @@
 TestPlane 通过 Kubernetes Event 记录 IntegrationTest 与 LoadTest 的关键节点，方便追踪进度与排障。
 
 - IntegrationTest：关注测试生命周期与步骤执行
-- LoadTest：关注目标就绪、负载部署、周期性断言
+- LoadTest：关注目标就绪、负载部署、健康检查
 
 ---
 
@@ -13,7 +13,7 @@ TestPlane 通过 Kubernetes Event 记录 IntegrationTest 与 LoadTest 的关键�
 
 ### 2.1 IntegrationTest
 
-**文件**：`internal/controller/framework/integrationtest/helpers.go`
+**文件**：`internal/controller/shared/events.go`
 
 ```go
 const (
@@ -30,7 +30,7 @@ const (
 
 ### 2.2 LoadTest
 
-**文件**：`internal/controller/framework/loadtest/helpers.go`
+**文件**：`internal/controller/shared/events.go`
 
 ```go
 const (
@@ -49,9 +49,9 @@ const (
 )
 ```
 
-**断言事件（LoadTest）**
+### 2.3 共享断言事件
 
-**文件**：`internal/controller/framework/constants.go`
+**文件**：`internal/controller/shared/events.go`
 
 ```go
 const (
@@ -86,8 +86,8 @@ const (
 | `TargetReady` | Normal | ReadyCondition 通过 | "Target is ready" |
 | `WorkloadApplied` | Normal | Workload apply 成功 | "Workload Deployment/load-generator applied successfully" |
 | `LoadTestRunning` | Normal | 进入 Running | "LoadTest is now running" |
-| `ExpectationPassed` | Normal | 周期检查通过 | "Expectations check passed (pass: 3, fail: 0)" |
-| `ExpectationFailed` | Warning | 周期检查失败 | "Expectations check failed (consecutive failures: 2)" |
+| `ExpectationPassed` | Normal | 健康检查通过 | "HealthCheck passed (pass: 3, fail: 0)" |
+| `ExpectationFailed` | Warning | 健康检查失败 | "HealthCheck failed (consecutive failures: 2)" |
 | `LoadTestFailed` | Warning | 失败终态 | "consecutive failures reached threshold: 3" |
 | `LoadTestSucceeded` | Normal | 成功终态 | "LoadTest completed successfully" |
 

@@ -93,39 +93,70 @@ type Expectation struct {
 ```
 
 **资源选择**：断言的目标资源由上下文自动确定：
-- IntegrationTest: 使用当前 Step 的资源（template 或 selector）
+- IntegrationTest: 使用当前 Step 的资源（manifest 或 selector）
 - LoadTest: 使用 Target 资源
 
-### WaitCondition
+### 条件类型
 
-统一断言条件，支持超时模式和周期模式。
+TestPlane 使用三种不同的条件类型：
+
+#### StepCondition
+
+用于 IntegrationTest 步骤的 `readyCondition` 和 `expectations`。
 
 ```go
-type WaitCondition struct {
-    // TimeoutSeconds 单次断言执行超时（秒），默认 10
-    // 控制单次检查的最大执行时间，超时则本次检查失败
+type StepCondition struct {
+    // TimeoutSeconds 单次检查超时（秒）。
     // +kubebuilder:default=10
     TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
+    // AllOf 所有期望都必须满足。
+    AllOf []Expectation `json:"allOf,omitempty"`
+    // AnyOf 任一期望满足即可。
+    AnyOf []Expectation `json:"anyOf,omitempty"`
+}
+```
 
-    // IntervalSeconds 检查间隔（秒），默认 10（周期模式使用）
+#### ReadyCondition
+
+用于 LoadTest 的 `target.readyCondition`。
+
+```go
+type ReadyCondition struct {
+    // TimeoutSeconds 总超时时间（秒）。
+    // +kubebuilder:default=300
+    TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
+    // AllOf 所有期望都必须满足。
+    AllOf []Expectation `json:"allOf,omitempty"`
+    // AnyOf 任一期望满足即可。
+    AnyOf []Expectation `json:"anyOf,omitempty"`
+}
+```
+
+#### HealthCheck
+
+用于 LoadTest 运行期健康检查（周期模式）。
+
+```go
+type HealthCheck struct {
+    // IntervalSeconds 检查间隔（秒）。
     // +kubebuilder:default=10
     IntervalSeconds int32 `json:"intervalSeconds,omitempty"`
-
-    // FailureThreshold 连续失败阈值，默认 3（周期模式使用）
+    // TimeoutSeconds 单次检查超时（秒）。
+    // +kubebuilder:default=10
+    TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
+    // FailureThreshold 连续失败阈值。
     // +kubebuilder:default=3
     FailureThreshold int32 `json:"failureThreshold,omitempty"`
-
-    // AllOf 所有期望都必须满足
+    // AllOf 所有期望都必须满足。
     AllOf []Expectation `json:"allOf,omitempty"`
-
-    // AnyOf 任一期望满足即可（可选）
+    // AnyOf 任一期望满足即可。
     AnyOf []Expectation `json:"anyOf,omitempty"`
 }
 ```
 
 **语义**：
-- **超时模式**：在超时时间内持续检查，直到 allOf 全部通过且 anyOf 至少一个通过
-- **周期模式**：按间隔周期检查，连续失败达阈值则失败
+- **StepCondition / ReadyCondition**：在超时时间内持续检查，直到 allOf 全部通过且 anyOf 至少一个通过
+- **HealthCheck**：按间隔周期检查，连续失败达阈值则失败
 
 ---
 
@@ -133,23 +164,22 @@ type WaitCondition struct {
 
 ### 场景对比
 
-| 场景 | CRD | 字段路径 | 模式 | 主要字段 |
+| 场景 | CRD | 字段路径 | 类型 | 主要字段 |
 |------|-----|---------|------|----------|
-| 步骤就绪条件 | IntegrationTest | `steps[].readyCondition` | 超时模式 | `timeoutSeconds` |
-| 步骤断言 | IntegrationTest | `steps[].expectations` | 超时模式 | `timeoutSeconds` |
-| 最终期望 | IntegrationTest | `expectations` | 超时模式 | `timeoutSeconds` |
-| Target 就绪条件 | LoadTest | `target.readyCondition` | 超时模式 | `timeoutSeconds` |
-| 运行期断言 | LoadTest | `expectations` | 周期模式 | `intervalSeconds`, `failureThreshold` |
+| 步骤就绪条件 | IntegrationTest | `steps[].readyCondition` | `StepCondition` | `timeoutSeconds` |
+| 步骤断言 | IntegrationTest | `steps[].expectations` | `StepCondition` | `timeoutSeconds` |
+| Target 就绪条件 | LoadTest | `target.readyCondition` | `ReadyCondition` | `timeoutSeconds` |
+| 健康检查 | LoadTest | `healthCheck` | `HealthCheck` | `intervalSeconds`, `failureThreshold` |
 
 ### 字段使用矩阵
 
-| 字段 | 超时模式 | 周期模式 |
-|------|----------|----------|
-| `timeoutSeconds` | ✅ 主要 | - |
-| `intervalSeconds` | - | ✅ 主要 |
-| `failureThreshold` | - | ✅ 主要 |
-| `allOf` | ✅ | ✅ |
-| `anyOf` | ✅ | ✅ |
+| 字段 | StepCondition | ReadyCondition | HealthCheck |
+|------|---------------|----------------|-------------|
+| `timeoutSeconds` | ✅ | ✅ | ✅（单次检查）|
+| `intervalSeconds` | - | - | ✅ |
+| `failureThreshold` | - | - | ✅ |
+| `allOf` | ✅ | ✅ | ✅ |
+| `anyOf` | ✅ | ✅ | ✅ |
 
 ---
 
@@ -158,24 +188,26 @@ type WaitCondition struct {
 ### 函数签名
 
 ```go
-// plugin/registry.go
+// internal/plugin/registry.go
 
-// Function 统一函数签名
-// - 用于断言：返回 Result 表示断言结果
-// - 用于提取：返回 Result.Actual 作为提取值
+// Function 统一函数签名（断言和提取）。
 // resource: CR 完整数据（由框架获取）
 // params: 用户定义的参数
+// 返回 Result，业务方按需使用：
+//   - 断言模式：使用 Passed、Actual、Message
+//   - 提取模式：使用 Value 返回提取的值
 type Function func(resource, params map[string]interface{}) Result
 ```
 
 ### Result 结构
 
 ```go
-// plugin/result.go
+// internal/plugin/result.go
 
 type Result struct {
     Passed  bool
-    Actual  string
+    Value   string  // 提取模式使用
+    Actual  string  // 断言模式使用
     Message string
 }
 
@@ -194,23 +226,35 @@ func (r Result) WithActual(actual interface{}) Result {
     r.Actual = fmt.Sprintf("%v", actual)
     return r
 }
+
+// Extract 创建提取结果（用于 EnvInjection）
+func Extract(value string) Result {
+    return Result{Passed: true, Value: value}
+}
 ```
 
 ### Registry 注册表
 
 ```go
-// plugin/registry.go
+// internal/plugin/registry.go
 
 type Registry struct {
-    functions map[string]Function  // 统一函数注册表
+    functions map[string]Function
 }
 
-// Register 注册函数（用于断言和提取）
+// NewRegistry 创建注册表。
+func NewRegistry() *Registry {
+    return &Registry{
+        functions: make(map[string]Function),
+    }
+}
+
+// Register 注册函数（用于断言和提取）。
 func (r *Registry) Register(name string, fn Function) {
     r.functions[name] = fn
 }
 
-// Call 调用函数
+// Call 调用函数。
 func (r *Registry) Call(name string, resource map[string]interface{}, paramsJSON []byte) (Result, error) {
     fn, ok := r.functions[name]
     if !ok {
@@ -224,19 +268,32 @@ func (r *Registry) Call(name string, resource map[string]interface{}, paramsJSON
 
     return fn(resource, params), nil
 }
+
+// Has 检查函数是否存在。
+func (r *Registry) Has(name string) bool {
+    _, ok := r.functions[name]
+    return ok
+}
 ```
 
 ---
 
 ## 内置断言函数
 
-### 函数注册（plugin/builtin.go）
+### 函数注册（internal/builtins/register.go）
 
 ```go
-func RegisterBuiltins(r *Registry) {
-    // ===== 断言函数 =====
+// RegisterAll 注册所有内置函数到指定的 Registry。
+func RegisterAll(r *plugin.Registry) {
+    RegisterCluster(r)
+    RegisterInstance(r)
+    RegisterK8s(r)
+    RegisterCommon(r)
+    RegisterExtraction(r)
+}
 
-    // Cluster 断言
+// RegisterCluster 注册 Cluster 相关的断言函数。
+func RegisterCluster(r *plugin.Registry) {
     r.Register("ClusterReady", ClusterReady)
     r.Register("ClusterHealthy", ClusterHealthy)
     r.Register("ClusterPending", ClusterPending)
@@ -247,8 +304,10 @@ func RegisterBuiltins(r *Registry) {
     r.Register("ClusterNodeCount", ClusterNodeCount)
     r.Register("ClusterSecurityGroupExists", ClusterSecurityGroupExists)
     r.Register("ClusterSecurityGroupNotExists", ClusterSecurityGroupNotExists)
+}
 
-    // Instance 断言
+// RegisterInstance 注册 Instance 相关的断言函数。
+func RegisterInstance(r *plugin.Registry) {
     r.Register("InstanceReady", InstanceReady)
     r.Register("InstanceStopped", InstanceStopped)
     r.Register("InstancePending", InstancePending)
@@ -258,13 +317,10 @@ func RegisterBuiltins(r *Registry) {
     r.Register("InstancePhaseEquals", InstancePhaseEquals)
     r.Register("InstanceSecurityGroupExists", InstanceSecurityGroupExists)
     r.Register("InstanceSecurityGroupNotExists", InstanceSecurityGroupNotExists)
+}
 
-    // 通用断言
-    r.Register("ResourceExists", ResourceExists)
-    r.Register("ResourceNotExists", ResourceNotExists)
-    r.Register("DeploymentAvailable", DeploymentAvailable)
-
-    // Kubernetes 资源就绪检查
+// RegisterK8s 注册 Kubernetes 资源就绪检查函数。
+func RegisterK8s(r *plugin.Registry) {
     r.Register("DeploymentReady", DeploymentReady)
     r.Register("StatefulSetReady", StatefulSetReady)
     r.Register("DaemonSetReady", DaemonSetReady)
@@ -273,8 +329,17 @@ func RegisterBuiltins(r *Registry) {
     r.Register("JobComplete", JobComplete)
     r.Register("ServiceReady", ServiceReady)
     r.Register("PVCBound", PVCBound)
+}
 
-    // ===== 提取函数（用于 EnvInjection）=====
+// RegisterCommon 注册通用断言函数。
+func RegisterCommon(r *plugin.Registry) {
+    r.Register("ResourceExists", ResourceExists)
+    r.Register("ResourceNotExists", ResourceNotExists)
+    r.Register("DeploymentAvailable", DeploymentAvailable)
+}
+
+// RegisterExtraction 注册提取函数（用于 EnvInjection）。
+func RegisterExtraction(r *plugin.Registry) {
     r.Register("ClusterNodeURL", ClusterNodeURL)
     r.Register("ClusterNodeIP", ClusterNodeIP)
     r.Register("ClusterID", ClusterID)
@@ -350,49 +415,51 @@ func RegisterBuiltins(r *Registry) {
 ### 示例实现
 
 ```go
-// plugin/functions.go
+// internal/builtins/cluster.go
 
 // ClusterHealthy 检查集群是否健康
-func ClusterHealthy(resource, params map[string]interface{}) Result {
-    status := getMap(resource, "status")
+func ClusterHealthy(resource, params map[string]interface{}) plugin.Result {
+    status := plugin.GetMap(resource, "status")
     if status == nil {
-        return Fail("no status")
+        return plugin.Fail("no status")
     }
 
-    phase := getString(status, "phase")
-    health := getString(status, "health")
-    transition := getString(status, "transitionStatus")
+    phase := plugin.GetString(status, "phase")
+    health := plugin.GetString(status, "health")
+    transition := plugin.GetString(status, "transitionStatus")
 
     if phase == "active" && health == "healthy" && transition == "" {
-        return Pass()
+        return plugin.Pass()
     }
-    return Fail("cluster not healthy").
+    return plugin.Fail("cluster not healthy").
            WithActual(fmt.Sprintf("phase=%s, health=%s, transition=%s", phase, health, transition))
 }
 
+// internal/builtins/common.go
+
 // DeploymentAvailable 检查 Deployment 是否可用
-func DeploymentAvailable(resource, params map[string]interface{}) Result {
-    status := getMap(resource, "status")
+func DeploymentAvailable(resource, params map[string]interface{}) plugin.Result {
+    status := plugin.GetMap(resource, "status")
     if status == nil {
-        return Fail("no status")
+        return plugin.Fail("no status")
     }
 
-    availableReplicas := getInt(status, "availableReplicas")
-    readyReplicas := getInt(status, "readyReplicas")
+    availableReplicas := plugin.GetInt(status, "availableReplicas")
+    readyReplicas := plugin.GetInt(status, "readyReplicas")
 
-    spec := getMap(resource, "spec")
+    spec := plugin.GetMap(resource, "spec")
     desiredReplicas := 1
     if spec != nil {
-        if r := getInt(spec, "replicas"); r > 0 {
+        if r := plugin.GetInt(spec, "replicas"); r > 0 {
             desiredReplicas = r
         }
     }
 
     if availableReplicas >= desiredReplicas && readyReplicas >= desiredReplicas {
-        return Pass()
+        return plugin.Pass()
     }
 
-    return Fail(fmt.Sprintf("deployment not available: %d/%d replicas ready", readyReplicas, desiredReplicas)).
+    return plugin.Fail(fmt.Sprintf("deployment not available: %d/%d replicas ready", readyReplicas, desiredReplicas)).
            WithActual(fmt.Sprintf("available=%d, ready=%d, desired=%d", availableReplicas, readyReplicas, desiredReplicas))
 }
 ```
@@ -406,7 +473,7 @@ func DeploymentAvailable(resource, params map[string]interface{}) Result {
 **关键点**：断言检查必须使用 **APIReader** 直接从 API Server 读取，绕过 controller-runtime 缓存，确保获取最新状态。
 
 ```go
-// resource/manager.go
+// internal/controller/shared/resource/manager.go
 
 type Manager struct {
     Client     client.Client
@@ -525,7 +592,7 @@ func SelectStateForExpectation(state map[string]interface{}) map[string]interfac
 ### ExpectationRunner - 统一执行器
 
 ```go
-// framework/expectation_runner.go
+// internal/controller/shared/expectation_runner.go
 
 type ExpectationRunner struct {
     Registry   *plugin.Registry
@@ -678,7 +745,7 @@ func (runner *ExpectationRunner) runExpectation(
 ### 代码实现
 
 ```go
-// integrationtest/step_expectation.go
+// internal/controller/integrationtest/step_expectation.go
 
 // checkStepExpectations 检查步骤的期望
 func (r *IntegrationTestReconciler) checkStepExpectations(
@@ -734,7 +801,7 @@ func (r *IntegrationTestReconciler) checkStepExpectations(
 ### 最终断言
 
 ```go
-// integrationtest/final_expectation.go
+// internal/controller/integrationtest/expectation.go
 
 // checkFinalExpectations 执行最终期望检查
 func (r *IntegrationTestReconciler) checkFinalExpectations(
@@ -786,13 +853,13 @@ func (r *IntegrationTestReconciler) checkFinalExpectations(
 
 ---
 
-## LoadTest 周期性断言
+## LoadTest 健康检查
 
-### ExpectationPolicy 执行流程
+### HealthCheck 执行流程
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                 LoadTest Periodic Check Flow                     │
+│                 LoadTest HealthCheck Flow                        │
 ├──────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │  1. Target ReadyCondition Passed                                 │
@@ -813,14 +880,14 @@ func (r *IntegrationTestReconciler) checkFinalExpectations(
 │         │          Yes                                          │
 │         │           │                                           │
 │         │   ┌───────────────────────────────┐                   │
-│         │   │ Build State for Expectations  │                   │
+│         │   │ Build State for HealthCheck   │                   │
 │         │   │ (Only fetch referenced)       │                   │
 │         │   └───────────────────────────────┘                   │
 │         │           │                                           │
 │         │   ┌───────────────────────────────┐                   │
-│         │   │ Run ExpectationPolicy         │                   │
+│         │   │ Run HealthCheck               │                   │
 │         │   │ ExpectationRunner             │                   │
-│         │   │   .RunExpectationPolicy()     │                   │
+│         │   │   .RunHealthCheck()           │                   │
 │         │   └───────────────────────────────┘                   │
 │         │           │                                           │
 │         │         ┌─┴─┐                                         │
@@ -862,7 +929,8 @@ spec:
   mode: Sequential
   steps:
     - name: create-deployment
-      template:
+      timeoutSeconds: 300
+      resource:
         manifest:
           apiVersion: apps/v1
           kind: Deployment
@@ -888,15 +956,8 @@ spec:
           - function: ResourceExists
       # 步骤断言（默认检查当前步骤的资源）
       expectations:
-        timeoutSeconds: 300
         allOf:
           - function: DeploymentAvailable  # 默认检查当前步骤的资源
-
-  # 最终期望
-  expectations:
-    timeoutSeconds: 60
-    allOf:
-      - function: ResourceExists
 ```
 
 ### LoadTest
@@ -908,30 +969,32 @@ metadata:
   name: app-load-test
 spec:
   target:
-    # 方式1：使用 template 创建资源
-    template:
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: target-app
-      spec:
-        replicas: 3
-        selector:
-          matchLabels:
-            app: target-app
-        template:
-          metadata:
-            labels:
+    # 方式1：使用 manifest 创建资源
+    resource:
+      manifest:
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: target-app
+        spec:
+          replicas: 3
+          selector:
+            matchLabels:
               app: target-app
-          spec:
-            containers:
-              - name: app
-                image: myapp:latest
+          template:
+            metadata:
+              labels:
+                app: target-app
+            spec:
+              containers:
+                - name: app
+                  image: myapp:latest
     # 方式2：使用 selector 引用已有资源
-    # selector:
-    #   apiVersion: apps/v1
-    #   kind: Deployment
-    #   name: existing-app
+    # resource:
+    #   selector:
+    #     apiVersion: apps/v1
+    #     kind: Deployment
+    #     name: existing-app
     # 就绪条件（超时模式）
     readyCondition:
       timeoutSeconds: 300
@@ -940,14 +1003,13 @@ spec:
 
   workload:
     resources:
-      templates:
-        - template:
-            apiVersion: apps/v1
-            kind: Deployment
-            # ...
+      - manifest:
+          apiVersion: apps/v1
+          kind: Deployment
+          # ...
 
-  # 运行期断言（周期模式，默认检查 target 资源）
-  expectations:
+  # 健康检查（周期模式，默认检查 target 资源）
+  healthCheck:
     intervalSeconds: 30
     failureThreshold: 3
     allOf:
@@ -982,16 +1044,16 @@ type ReadyConditionStatus struct {
 }
 ```
 
-### ExpectationsStatus (LoadTest)
+### HealthCheckStatus (LoadTest)
 
 ```go
-type ExpectationsStatus struct {
+type HealthCheckStatus struct {
     LastCheckTime       *metav1.Time
     CheckCount          int32        // 总检查次数
     PassCount           int32        // 成功次数
     FailCount           int32        // 失败次数
     ConsecutiveFailures int32        // 当前连续失败次数
-    LastResults         []ExpectationResult
+    LastResults         []ExpectationResultSummary
 }
 ```
 
@@ -1013,46 +1075,52 @@ type ExpectationResult struct {
 
 ### 添加自定义函数
 
-**步骤 1**: 在 `internal/controller/framework/plugin/functions.go` 中实现：
+**步骤 1**: 在 `internal/builtins/` 中创建函数文件（如 `custom.go`）：
 
 ```go
+// internal/builtins/custom.go
+package builtins
+
+import (
+    "fmt"
+    "github.com/lunz1207/testplane/internal/plugin"
+)
+
 // MyCustomExpect 检查自定义条件
 // params: expected (string, 必填), threshold (int, 可选)
-func MyCustomExpect(resource, params map[string]interface{}) Result {
+func MyCustomExpect(resource, params map[string]interface{}) plugin.Result {
     // 1. 获取参数
-    expected := getString(params, "expected")
-    threshold := getInt(params, "threshold")
+    expected := plugin.GetString(params, "expected")
+    threshold := plugin.GetInt(params, "threshold")
     if threshold == 0 {
         threshold = 10 // 默认值
     }
 
     // 2. 获取资源状态
-    status := getMap(resource, "status")
+    status := plugin.GetMap(resource, "status")
     if status == nil {
-        return Fail("no status")
+        return plugin.Fail("no status")
     }
 
     // 3. 执行检查
-    actual := getString(status, "myField")
-    count := getInt(status, "count")
+    actual := plugin.GetString(status, "myField")
+    count := plugin.GetInt(status, "count")
 
     if actual == expected && count >= threshold {
-        return Pass()
+        return plugin.Pass()
     }
 
     // 4. 返回失败结果（包含实际值用于调试）
-    return Fail(fmt.Sprintf("expected %s with count >= %d", expected, threshold)).
+    return plugin.Fail(fmt.Sprintf("expected %s with count >= %d", expected, threshold)).
            WithActual(fmt.Sprintf("actual=%s, count=%d", actual, count))
 }
 ```
 
-**步骤 2**: 在 `internal/controller/framework/plugin/builtin.go` 中注册：
+**步骤 2**: 在 `internal/builtins/register.go` 中注册：
 
 ```go
-func RegisterBuiltins(r *Registry) {
-    // ...existing registrations...
-
-    // 自定义断言
+// RegisterCustom 注册自定义断言函数。
+func RegisterCustom(r *plugin.Registry) {
     r.Register("MyCustomExpect", MyCustomExpect)
 }
 ```
@@ -1063,12 +1131,13 @@ func RegisterBuiltins(r *Registry) {
 # 在 IntegrationTest step 中使用（断言自动检查当前步骤的资源）
 steps:
   - name: check-my-resource
-    selector:
-      apiVersion: example.com/v1
-      kind: MyResource
-      name: my-instance
+    timeoutSeconds: 60
+    resource:
+      selector:
+        apiVersion: example.com/v1
+        kind: MyResource
+        name: my-instance
     expectations:
-      timeoutSeconds: 60
       allOf:
         - function: MyCustomExpect
           params:

@@ -44,12 +44,7 @@ for !ready {
 ```go
 // 推荐：使用 SSA
 lt.Status.Phase = "Running"
-err := framework.PatchStatusSSA(ctx, r.Client, lt, "loadtest-controller")
-
-// 便利函数（自动选择 fieldOwner）
-original := lt.DeepCopy()  // 兼容性保留，实际不使用
-lt.Status.Phase = "Running"
-err := framework.PatchStatusMerge(ctx, r.Client, lt, original)
+err := shared.PatchLoadTestStatusFromObject(ctx, r.Client, lt)
 
 // 不推荐：使用 Update（容易冲突）
 lt.Status.Phase = "Running"
@@ -175,11 +170,12 @@ step.TimeoutSeconds (默认 600s)
 
 | 功能 | 文件路径 |
 |------|----------|
-| 主控制器 | `internal/controller/framework/integrationtest/integrationtest_controller.go` |
-| 执行逻辑 | `internal/controller/framework/integrationtest/execution.go` |
-| 步骤执行 | `internal/controller/framework/integrationtest/step_runner.go` |
-| 生命周期 | `internal/controller/framework/integrationtest/lifecycle.go` |
-| 资源管理 | `internal/controller/framework/resource/manager.go` |
+| 主控制器 | `internal/controller/integrationtest/integrationtest_controller.go` |
+| 执行逻辑 | `internal/controller/integrationtest/execution.go` |
+| 步骤执行 | `internal/controller/integrationtest/step_runner.go` |
+| 步骤期望检查 | `internal/controller/integrationtest/step_expectation.go` |
+| 生命周期 | `internal/controller/integrationtest/lifecycle.go` |
+| 资源管理 | `internal/controller/shared/resource/manager.go` |
 
 ---
 
@@ -209,7 +205,7 @@ step.TimeoutSeconds (默认 600s)
 │    │                                                                 │
 │    ▼                                                                 │
 │  Running（周期循环）                                                  │
-│    ├─ 6. 执行 Expectations 检查                                      │
+│    ├─ 6. 执行 HealthCheck 检查                                       │
 │    │     ├─ 通过：重置连续失败计数                                   │
 │    │     └─ 失败：累加连续失败计数                                   │
 │    │                                                                 │
@@ -270,23 +266,23 @@ func injectAnnotationsToWorkload(obj *unstructured.Unstructured, values map[stri
 }
 ```
 
-### 周期性断言
+### 周期性健康检查
 
 ```go
-func (r *Reconciler) runExpectationsCheck(ctx, lt) (ctrl.Result, error) {
-    expectations := lt.Spec.Expectations
+func (r *Reconciler) runHealthCheck(ctx, lt) (ctrl.Result, error) {
+    healthCheck := lt.Spec.HealthCheck
 
     // 检查间隔
-    interval := time.Duration(expectations.IntervalSeconds) * time.Second
+    interval := time.Duration(healthCheck.IntervalSeconds) * time.Second
     if interval == 0 {
         interval = 10 * time.Second
     }
 
     // 执行断言
-    results, allPassed := r.runExpectations(ctx, target, *expectations)
+    results, allPassed := r.runExpectations(ctx, target, *healthCheck)
 
     // 更新状态
-    status := &lt.Status.ExpectationsStatus
+    status := &lt.Status.HealthCheckStatus
     status.CheckCount++
     status.LastCheckTime = &metav1.Time{Time: time.Now()}
     status.LastResults = results
@@ -299,12 +295,12 @@ func (r *Reconciler) runExpectationsCheck(ctx, lt) (ctrl.Result, error) {
         status.ConsecutiveFailures++
 
         // 检查阈值
-        threshold := expectations.FailureThreshold
+        threshold := healthCheck.FailureThreshold
         if threshold == 0 {
             threshold = 3
         }
-        if status.ConsecutiveFailures >= threshold {
-            return r.setFailed(ctx, lt, "ExpectationsFailed",
+        if status.ConsecutiveFailures >= int32(threshold) {
+            return r.setFailed(ctx, lt, "HealthCheckFailed",
                 fmt.Sprintf("连续失败达阈值: %d", threshold))
         }
     }
@@ -317,12 +313,12 @@ func (r *Reconciler) runExpectationsCheck(ctx, lt) (ctrl.Result, error) {
 
 | 功能 | 文件路径 |
 |------|----------|
-| 主控制器 | `internal/controller/framework/loadtest/loadtest_controller.go` |
-| 生命周期 | `internal/controller/framework/loadtest/lifecycle.go` |
-| Target 处理 | `internal/controller/framework/loadtest/target.go` |
-| Workload 应用 | `internal/controller/framework/loadtest/workload.go` |
-| 环境注入 | `internal/controller/framework/loadtest/injection.go` |
-| 运行期断言 | `internal/controller/framework/loadtest/running.go` |
+| 主控制器 | `internal/controller/loadtest/loadtest_controller.go` |
+| 生命周期 | `internal/controller/loadtest/lifecycle.go` |
+| Target 处理 | `internal/controller/loadtest/target.go` |
+| Workload 应用 | `internal/controller/loadtest/workload.go` |
+| 环境注入 | `internal/controller/loadtest/injection.go` |
+| 运行期健康检查 | `internal/controller/loadtest/running.go` |
 
 ---
 
@@ -510,8 +506,8 @@ func (r *ExpectationRunner) runWebhook(exp Expectation, state map[string]interfa
 | API 错误 | API Server 不可用 / 权限不足 | 重试（RequeueAfter） |
 | 收敛超时 | 超过步骤 TimeoutSeconds | 步骤失败 |
 | 断言未满足 | Expectation 返回 false | 继续等待 |
-| 断言超时 | 超过 expectations.TimeoutSeconds | 步骤/测试失败 |
-| 连续失败 | 超过 FailureThreshold | LoadTest 失败 |
+| 断言超时 | 超过 step.timeoutSeconds | 步骤/测试失败 |
+| 连续失败 | 超过 healthCheck.FailureThreshold | LoadTest 失败 |
 
 ### 重试策略
 
