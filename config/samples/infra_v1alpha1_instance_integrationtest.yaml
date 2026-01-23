@@ -101,12 +101,10 @@ spec:
           kind: Instance
           metadata:
             name: instance-sample
-            annotations:
-              infra.qingcloud.test/restart-requested: "true"
           spec:
             lifecycle:
               onDelete: Destroy
-              powerState: running
+              powerState: restart
       expectations:
         allOf:
           - function: InstanceReady
