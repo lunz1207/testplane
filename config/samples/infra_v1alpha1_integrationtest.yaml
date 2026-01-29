@@ -2,7 +2,7 @@
 apiVersion: infra.testplane.io/v1alpha1
 kind: IntegrationTest
 metadata:
-  name: sequential-deployment-integrationtest-sample
+  name: deployment-sequential-integrationtest-sample
   labels:
     app.kubernetes.io/name: testplane
     app.kubernetes.io/managed-by: kustomize

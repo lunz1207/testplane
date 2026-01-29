@@ -3,7 +3,7 @@
 apiVersion: infra.testplane.io/v1alpha1
 kind: IntegrationTest
 metadata:
-  name: parallel-cluster-integrationtest-sample
+  name: cluster-parallel-integrationtest-sample
   labels:
     app.kubernetes.io/name: testplane
     app.kubernetes.io/managed-by: kustomize

@@ -2,7 +2,7 @@
 apiVersion: infra.testplane.io/v1alpha1
 kind: IntegrationTest
 metadata:
-  name: sequential-cluster-integrationtest-sample
+  name: cluster-sequential-integrationtest-sample
   labels:
     app.kubernetes.io/name: testplane
     app.kubernetes.io/managed-by: kustomize
@@ -38,30 +38,337 @@ spec:
             params:
               expected: 2
 
+    - name: 绑定安全组
+      timeoutSeconds: 600
+      resource:
+        manifest:
+          apiVersion: infra.qingcloud.test/v1alpha1
+          kind: Cluster
+          metadata:
+            labels:
+              app.kubernetes.io/name: qingcloud-operator
+              app.kubernetes.io/managed-by: kustomize
+            name: cluster-sample
+          spec:
+            zone: "pek3b"
+            appVersionRef:
+              name: mysql-plus-1.4.1
+            confOverrides:
+              cluster:
+                vxnet: vxnet-0hqwk3e
+                maininstance:
+                  count: 2
+            securityGroupsRef:
+              - name: securitygroup-sample
+            lifecycle:
+              powerState: active
+              onDelete: Destroy
+      expectations:
+        allOf:
+          - function: ClusterSecurityGroupExists
+          - function: ClusterReady
+
+    - name: 添加用户
+      timeoutSeconds: 600
+      resource:
+        manifest:
+          apiVersion: infra.qingcloud.test/v1alpha1
+          kind: Cluster
+          metadata:
+            labels:
+              app.kubernetes.io/name: qingcloud-operator
+              app.kubernetes.io/managed-by: kustomize
+            name: cluster-sample
+          spec:
+            zone: "pek3b"
+            appVersionRef:
+              name: mysql-plus-1.4.1
+            users:
+              - user: ubuntu
+                database: "*"
+                host: "%"
+                password: Zhu88jie@
+                ssl: "NO"
+                privilege: SuperuserAccount
+                expireTime: 0
+                role: maininstance
+            confOverrides:
+              cluster:
+                vxnet: vxnet-0hqwk3e
+                maininstance:
+                  count: 2
+            securityGroupsRef:
+              - name: securitygroup-sample
+            lifecycle:
+              powerState: active
+              onDelete: Destroy
+      expectations:
+        allOf:
+          - function: ClusterReady
+
     - name: 增加节点
       resource:
         manifest:
           apiVersion: infra.qingcloud.test/v1alpha1
           kind: Cluster
           metadata:
+            labels:
+              app.kubernetes.io/name: qingcloud-operator
+              app.kubernetes.io/managed-by: kustomize
             name: cluster-sample
           spec:
-            owner: "usr-hRAmdSn6"
             zone: "pek3b"
             appVersionRef:
               name: mysql-plus-1.4.1
+            users:
+              - user: ubuntu
+                database: "*"
+                host: "%"
+                password: Zhu88jie@
+                ssl: "NO"
+                privilege: SuperuserAccount
+                expireTime: 0
+                role: maininstance
             confOverrides:
               cluster:
-                vpc_router_id: rtr-qk0rurp3
                 vxnet: vxnet-0hqwk3e
                 maininstance:
                   count: 3
+            securityGroupsRef:
+              - name: securitygroup-sample
+            lifecycle:
+              powerState: active
+              onDelete: Destroy
       expectations:
         allOf:
           - function: ClusterReady
           - function: ClusterNodeCount
             params:
               expected: 3
+
+    - name: 解绑安全组
+      resource:
+        manifest:
+          apiVersion: infra.qingcloud.test/v1alpha1
+          kind: Cluster
+          metadata:
+            labels:
+              app.kubernetes.io/name: qingcloud-operator
+              app.kubernetes.io/managed-by: kustomize
+            name: cluster-sample
+          spec:
+            zone: "pek3b"
+            appVersionRef:
+              name: mysql-plus-1.4.1
+            users:
+              - user: ubuntu
+                database: "*"
+                host: "%"
+                password: Zhu88jie@
+                ssl: "NO"
+                privilege: SuperuserAccount
+                expireTime: 0
+                role: maininstance
+            confOverrides:
+              cluster:
+                vxnet: vxnet-0hqwk3e
+                maininstance:
+                  count: 3
+            lifecycle:
+              powerState: active
+              onDelete: Destroy
+      expectations:
+        allOf:
+          - function: ClusterSecurityGroupNotExists
+          - function: ClusterReady
+
+    - name: 修改环境变量
+      resource:
+        manifest:
+          apiVersion: infra.qingcloud.test/v1alpha1
+          kind: Cluster
+          metadata:
+            labels:
+              app.kubernetes.io/name: qingcloud-operator
+              app.kubernetes.io/managed-by: kustomize
+            name: cluster-sample
+          spec:
+            zone: "pek3b"
+            appVersionRef:
+              name: mysql-plus-1.4.1
+            users:
+              - user: ubuntu
+                database: "*"
+                host: "%"
+                password: Zhu88jie@
+                ssl: "NO"
+                privilege: SuperuserAccount
+                expireTime: 0
+                role: maininstance
+            confOverrides:
+              cluster:
+                vxnet: vxnet-0hqwk3e
+                maininstance:
+                  count: 3
+              env:
+                slow_log_display_number: 90
+            lifecycle:
+              powerState: active
+              onDelete: Destroy
+      expectations:
+        allOf:
+          - function: ClusterReady
+
+    - name: 删除节点
+      resource:
+        manifest:
+          apiVersion: infra.qingcloud.test/v1alpha1
+          kind: Cluster
+          metadata:
+            labels:
+              app.kubernetes.io/name: qingcloud-operator
+              app.kubernetes.io/managed-by: kustomize
+            name: cluster-sample
+          spec:
+            zone: "pek3b"
+            appVersionRef:
+              name: mysql-plus-1.4.1
+            users:
+              - user: ubuntu
+                database: "*"
+                host: "%"
+                password: Zhu88jie@
+                ssl: "NO"
+                privilege: SuperuserAccount
+                expireTime: 0
+                role: maininstance
+            confOverrides:
+              cluster:
+                vxnet: vxnet-0hqwk3e
+                maininstance:
+                  count: 2
+              env:
+                slow_log_display_number: 90
+            lifecycle:
+              powerState: active
+              onDelete: Destroy
+      expectations:
+        allOf:
+          - function: ClusterReady
+          - function: ClusterNodeCount
+            params:
+              expected: 2
+
+    - name: 关闭集群
+      resource:
+        manifest:
+          apiVersion: infra.qingcloud.test/v1alpha1
+          kind: Cluster
+          metadata:
+            labels:
+              app.kubernetes.io/name: qingcloud-operator
+              app.kubernetes.io/managed-by: kustomize
+            name: cluster-sample
+          spec:
+            zone: "pek3b"
+            appVersionRef:
+              name: mysql-plus-1.4.1
+            users:
+              - user: ubuntu
+                database: "*"
+                host: "%"
+                password: Zhu88jie@
+                ssl: "NO"
+                privilege: SuperuserAccount
+                expireTime: 0
+                role: maininstance
+            confOverrides:
+              cluster:
+                vxnet: vxnet-0hqwk3e
+                maininstance:
+                  count: 2
+              env:
+                slow_log_display_number: 90
+            lifecycle:
+              powerState: stopped
+              onDelete: Destroy
+      expectations:
+        allOf:
+          - function: ClusterStopped
+
+    - name: 启动集群
+      resource:
+        manifest:
+          apiVersion: infra.qingcloud.test/v1alpha1
+          kind: Cluster
+          metadata:
+            labels:
+              app.kubernetes.io/name: qingcloud-operator
+              app.kubernetes.io/managed-by: kustomize
+            name: cluster-sample
+          spec:
+            zone: "pek3b"
+            appVersionRef:
+              name: mysql-plus-1.4.1
+            users:
+              - user: ubuntu
+                database: "*"
+                host: "%"
+                password: Zhu88jie@
+                ssl: "NO"
+                privilege: SuperuserAccount
+                expireTime: 0
+                role: maininstance
+            confOverrides:
+              cluster:
+                vxnet: vxnet-0hqwk3e
+                maininstance:
+                  count: 2
+              env:
+                slow_log_display_number: 90
+            lifecycle:
+              powerState: active
+              onDelete: Destroy
+      expectations:
+        allOf:
+          - function: ClusterReady
+
+    - name: 重启集群
+      resource:
+        manifest:
+          apiVersion: infra.qingcloud.test/v1alpha1
+          kind: Cluster
+          metadata:
+            labels:
+              app.kubernetes.io/name: qingcloud-operator
+              app.kubernetes.io/managed-by: kustomize
+            name: cluster-sample
+          spec:
+            zone: "pek3b"
+            appVersionRef:
+              name: mysql-plus-1.4.1
+            users:
+              - user: ubuntu
+                database: "*"
+                host: "%"
+                password: Zhu88jie@
+                ssl: "NO"
+                privilege: SuperuserAccount
+                expireTime: 0
+                role: maininstance
+            confOverrides:
+              cluster:
+                vxnet: vxnet-0hqwk3e
+                maininstance:
+                  count: 2
+              env:
+                slow_log_display_number: 90
+            lifecycle:
+              powerState: restart
+              onDelete: Destroy
+      expectations:
+        allOf:
+          - function: ClusterHealthy
 
     - name: 升级集群
       timeoutSeconds: 1200
@@ -70,18 +377,33 @@ spec:
           apiVersion: infra.qingcloud.test/v1alpha1
           kind: Cluster
           metadata:
+            labels:
+              app.kubernetes.io/name: qingcloud-operator
+              app.kubernetes.io/managed-by: kustomize
             name: cluster-sample
           spec:
-            owner: "usr-hRAmdSn6"
             zone: "pek3b"
             appVersionRef:
               name: mysql-plus-1.5.0
+            users:
+              - user: ubuntu
+                database: "*"
+                host: "%"
+                password: Zhu88jie@
+                ssl: "NO"
+                privilege: SuperuserAccount
+                expireTime: 0
+                role: maininstance
             confOverrides:
               cluster:
-                vpc_router_id: rtr-qk0rurp3
                 vxnet: vxnet-0hqwk3e
                 maininstance:
-                  count: 3
+                  count: 2
+              env:
+                slow_log_display_number: 90
+            lifecycle:
+              powerState: active
+              onDelete: Destroy
       expectations:
         allOf:
           - function: ClusterHealthy
