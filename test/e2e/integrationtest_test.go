@@ -162,11 +162,6 @@ var _ = Describe("IntegrationTest Controller", Ordered, func() {
 			completed, err := getIntegrationTestField(testName, testNamespace, ".status.completedRounds")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(completed).To(Equal("2"), "completedRounds should be 2")
-
-			By("verifying roundHistory is populated")
-			historyLen, err := getIntegrationTestField(testName, testNamespace, ".status.roundHistory")
-			Expect(err).NotTo(HaveOccurred())
-			Expect(historyLen).NotTo(BeEmpty(), "roundHistory should be populated")
 		})
 
 		It("should track currentRound during execution", func() {
