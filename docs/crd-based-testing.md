@@ -1,25 +1,25 @@
 # 基于 CRD 的自动化测试：工具 vs 服务
 
-## 项目背景
+## 概述
 
-| 项目 | 定位 | 技术栈 |
+本文对比两种自动化测试方式：
+
+| 方式 | 定位 | 典型技术栈 |
 |------|------|--------|
-| **QingCloud** | **被测系统**（IaaS/PaaS 云平台） | HTTP API |
-| qingcloud-autotest | 传统 API 自动化测试工具 | Python + Pytest |
-| qingcloud-operator | 将被测系统封装为 CRD | Go + Kubebuilder |
-| TestPlane | CRD 驱动的测试框架 | Go + Kubebuilder |
+| **传统 API 测试** | 脚本/工具驱动的测试 | Python + Pytest |
+| **CRD 测试** | 服务化的声明式测试 | Go + Kubebuilder |
 
-**架构关系**：
+**架构对比**：
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                                                                 │
 │  传统方式：                                                      │
-│  qingcloud-autotest ──HTTP API──→ QingCloud（被测系统）          │
+│  测试工具 ──HTTP API──→ 被测系统                                  │
 │                                                                 │
 │  CRD 方式：                                                      │
-│  TestPlane ──→ qingcloud-operator ──HTTP API──→ QingCloud       │
-│   (测试框架)     (CRD 封装层)                   (被测系统)        │
+│  TestPlane ──→ 资源 Operator ──HTTP API──→ 被测系统              │
+│  (测试框架)    (CRD 封装层)                                       │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -100,7 +100,7 @@
 │    │      等待...              │     - Zone 配置                 │
 │    │                          │                                │
 │    │      等待...              │  4. 执行测试                    │
-│    │      等待...              │     $ arun -e dev -m P0        │
+│    │      等待...              │     $ test-run -e dev -m P0        │
 │    │      等待...              │                                │
 │    │      等待...              │     等待 30-60 分钟...          │
 │    │                          │                                │
@@ -196,20 +196,20 @@
 开发想参与用例开发：
 
   ┌─────────────────────────────────────────────────────────┐
-  │  qingcloud-autotest 代码结构                             │
+  │  api-autotest 代码结构                             │
   │                                                         │
   │  testcases/                                             │
-  │  ├── iaas/                                              │
+  │  ├── resources/                                              │
   │  │   └── compute/                                       │
   │  │       └── test_cluster.py   ← Python + Pytest        │
   │  │                                                      │
   │  apis/                                                  │
-  │  ├── iaas/                                              │
+  │  ├── resources/                                              │
   │  │   └── compute/                                       │
   │  │       └── cluster.py        ← API 封装层              │
   │  │                                                      │
   │  data/                                                  │
-  │  └── iaas_data/                                         │
+  │  └── test_data/                                         │
   │      └── cluster_data.yaml     ← 测试数据               │
   └─────────────────────────────────────────────────────────┘
 
@@ -217,7 +217,7 @@
   1. 克隆测试仓库
   2. 理解项目结构（testcases/apis/data 分离）
   3. 学习 Python + Pytest
-  4. 学习 aomaker 框架（装饰器、异步处理）
+  4. 学习 test-framework 框架（装饰器、异步处理）
   5. 理解 API 封装层
   6. 配置本地环境运行测试
 
@@ -230,10 +230,10 @@
   工具模式：
 
   1. 找到数据文件
-     $ vim data/iaas_data/cluster_data.yaml
+     $ vim data/test_data/cluster_data.yaml
 
   2. 或者找到代码中的硬编码
-     $ vim testcases/iaas/compute/test_cluster.py
+     $ vim testcases/resources/compute/test_cluster.py
      # 修改 node_count = 5
 
   3. 需要懂 Python 才能确保不破坏语法
@@ -267,7 +267,7 @@
   │      - name: create-cluster                             │
   │        resource:                                        │
   │          manifest:                                      │
-  │            apiVersion: infra.qingcloud.test/v1alpha1    │
+  │            apiVersion: example.io/v1alpha1    │
   │            kind: Cluster                                │
   │            spec:                                        │
   │              nodeCount: 3           ← 测试数据直接可见   │
@@ -368,7 +368,7 @@
 │  ┌─────────────────────────────────────────────────────────┐   │
 │  │                     客户现场（K8s 集群）                   │   │
 │  │                                                         │   │
-│  │   QingCloud 云平台（新部署的被测系统）                      │   │
+│  │   云平台（新部署的被测系统）                              │   │
 │  │                                                         │   │
 │  │         ↑ 网络隔离                                       │   │
 │  └─────────│───────────────────────────────────────────────┘   │
@@ -378,18 +378,18 @@
 │  ┌─────────│───────────────────────────────────────────────┐   │
 │  │         ↓              交付工程师本地                      │   │
 │  │                                                         │   │
-│  │   1. 克隆 qingcloud-autotest                             │   │
+│  │   1. 克隆 api-autotest                             │   │
 │  │                                                         │   │
 │  │   2. 配置客户环境                                         │   │
-│  │      customer-xxx:                                       │   │
-│  │        host: "https://api.customer.com"                  │   │
-│  │        qy_access_key_id: "客户AK"      ← 明文凭证         │   │
-│  │        qy_secret_access_key: "客户SK"                    │   │
+│  │      customer-env:                                       │   │
+│  │        host: "https://api.customer-env.example.com"                  │   │
+│  │        access_key_id: "ACCESS_KEY"      ← 明文凭证         │   │
+│  │        secret_access_key: "SECRET_KEY"                    │   │
 │  │                                                         │   │
 │  │   3. 配置 VPN 连接客户网络                                 │   │
 │  │                                                         │   │
 │  │   4. 执行测试                                            │   │
-│  │      $ arun -e customer-xxx -m P0 P1                    │   │
+│  │      $ test-run -e customer-env -m P0 P1                    │   │
 │  │                                                         │   │
 │  │   5. 等待数小时...                                        │   │
 │  │                                                         │   │
@@ -423,7 +423,7 @@
 │  │                     客户 K8s 集群                         │   │
 │  │                                                         │   │
 │  │   ┌─────────────┐    ┌─────────────┐    ┌───────────┐   │   │
-│  │   │ TestPlane   │    │ qingcloud-  │    │ 测试用例   │   │   │
+│  │   │ TestPlane   │    │ resource-  │    │ 测试用例   │   │   │
 │  │   │ Controller  │    │ operator    │    │ CR        │   │   │
 │  │   │             │    │ (CRD封装层) │    │           │   │   │
 │  │   └──────┬──────┘    └──────┬──────┘    └─────┬─────┘   │   │
@@ -518,9 +518,9 @@
 
 ```python
 # 传统方式：装饰器 + 阻塞轮询
-# 文件：qingcloud-autotest/apis/iaas/compute/instance.py
+# 文件：api-autotest/apis/resources/compute/instance.py
 
-@aomaker.async_api(iaas_handler, "job_id", condition=cond)
+@test-framework.async_api(api_handler, "job_id", condition=cond)
 def create_cluster(self, ...):
     """
     内部流程：
@@ -624,19 +624,19 @@ Controller
 
 ```yaml
 # 传统方式：每个环境需要完整配置
-# 文件：qingcloud-autotest/conf/config.yaml
+# 文件：api-autotest/conf/config.yaml
 
 # 环境 1
 testing:
   account:
     user: "test@example.com"
     pwd: "xxx"
-  host: "https://console.testing.com"
+  host: "https://console.test-env.example.com"
   api_host: "https://api.testing.com"
-  qy_access_key_id: "AKID_XXX"
-  qy_secret_access_key: "SECRET_XXX"
-  zone: ["pek3b"]
-  region: "pek3"
+  access_key_id: "AK_EXAMPLE"
+  secret_access_key: "SECRET_XXX"
+  zone: ["zone-1"]
+  region: "region-1"
   # ... 更多配置
 
 # 环境 2
@@ -644,15 +644,15 @@ staging:
   account:
     user: "stage@example.com"
     pwd: "yyy"
-  host: "https://console.staging.com"
+  host: "https://console.staging-env.example.com"
   # ... 完全独立的配置
 
 # 客户环境 1
-customer-bank:
+customer-a:
   # ... 又一套配置
 
 # 客户环境 2
-customer-insurance:
+customer-b:
   # ... 又一套配置
 
 # 问题：
@@ -664,11 +664,11 @@ customer-insurance:
 
 ```python
 # 测试数据也需要单独管理
-# 文件：data/iaas_data/cluster_data/
+# 文件：data/test_data/cluster_data/
 
 cluster_config.yaml
-├── image_id: "img-xxx"
-├── instance_type: "c2m4"
+├── image_id: "image-001"
+├── instance_type: "standard-2c4g"
 ├── node_count: 3
 └── ...
 
@@ -697,13 +697,13 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: customer-bank  # 客户环境
+  name: customer-a  # 客户环境
 
 # 2. 凭证管理：通过 Secret（加密存储）
 apiVersion: v1
 kind: Secret
 metadata:
-  name: qingcloud-credentials
+  name: resource-credentials
   namespace: testing
 data:
   access_key_id: <base64>
@@ -716,8 +716,8 @@ metadata:
   name: test-config
   namespace: testing
 data:
-  zone: "pek3b"
-  region: "pek3"
+  zone: "zone-1"
+  region: "region-1"
 
 # 4. 测试数据：内嵌或模板引用
 
@@ -732,7 +732,7 @@ spec:
     - name: create-cluster
       resource:
         manifest:
-          apiVersion: infra.qingcloud.test/v1alpha1
+          apiVersion: example.io/v1alpha1
           kind: Cluster
           spec:
             # 测试数据直接定义
@@ -743,12 +743,12 @@ spec:
 
 ---
 # 方式二：模板引用（复用配置）
-apiVersion: infra.qingcloud.test/v1alpha1
+apiVersion: example.io/v1alpha1
 kind: AppVersion                    # 配置模板
 metadata:
-  name: mysql-plus-1.5.0
+  name: app-template-v1
 spec:
-  appID: app-00r26u27
+  appID: app-12345678
   conf:
     cluster:
       maininstance:
@@ -766,11 +766,11 @@ spec:
     - name: create-cluster
       resource:
         manifest:
-          apiVersion: infra.qingcloud.test/v1alpha1
+          apiVersion: example.io/v1alpha1
           kind: Cluster
           spec:
             appVersionRef:
-              name: mysql-plus-1.5.0   # 引用模板
+              name: app-template-v1   # 引用模板
             confOverrides:             # 仅覆盖差异部分
               cluster:
                 maininstance:
@@ -787,7 +787,7 @@ spec:
   ├── customer-1: {...完整配置...}
   └── customer-2: {...完整配置...}
 
-  运行时：arun -e testing -m P0
+  运行时：test-run -e testing -m P0
   切换环境：修改 -e 参数
 
 
@@ -802,7 +802,7 @@ spec:
   │   ├── Secret: credentials（不同的凭证）
   │   └── IntegrationTest: my-test（同样的测试）
   │
-  └── namespace: customer-bank
+  └── namespace: customer-a
       └── ...
 
   运行时：kubectl apply -f test.yaml -n testing
@@ -831,7 +831,7 @@ spec:
 ```
 测试执行中：
 
-  $ arun -e testing -m cluster_P0
+  $ test-run -e testing -m cluster_P0
 
   执行中...
   执行中...
@@ -957,12 +957,12 @@ class TestCluster:
 ```yaml
 # CRD 方式：Kubernetes 原生机制
 
-apiVersion: infra.qingcloud.test/v1alpha1
+apiVersion: example.io/v1alpha1
 kind: Cluster
 metadata:
   name: test-cluster
   finalizers:
-    - infra.qingcloud.test/finalizer    # 终结器
+    - example.io/finalizer    # 终结器
   ownerReferences:
     - apiVersion: infra.testplane.io/v1alpha1
       kind: IntegrationTest
@@ -1013,7 +1013,7 @@ metadata:
 │                                                                 │
 │   未来可能：                                                     │
 │   ┌─────────────────┐                                           │
-│   │ qingcloud-      │  ← 资源管理 CRD 化                         │
+│   │ resource-      │  ← 资源管理 CRD 化                         │
 │   │ operator        │  ← 声明式管理云资源                        │
 │   └─────────────────┘                                           │
 │                                                                 │
@@ -1026,7 +1026,7 @@ metadata:
 工具模式（传统 API 测试）：
 
   ┌──────────────────┐         ┌──────────────────┐
-  │ qingcloud-autotest│  HTTP   │ 云平台 API       │
+  │ api-autotest│  HTTP   │ 云平台 API       │
   │ (外部工具)        │ ──────→ │ (K8s 内或外)     │
   └──────────────────┘         └──────────────────┘
          ↑
@@ -1041,7 +1041,7 @@ metadata:
   │                  K8s 集群内                       │
   │                                                 │
   │  ┌────────────┐    ┌──────────────┐    ┌─────┐ │
-  │  │ TestPlane  │ →  │ qingcloud-   │ →  │云平台│ │
+  │  │ TestPlane  │ →  │ resource-   │ →  │云平台│ │
   │  │ Controller │    │ operator     │    │ API │ │
   │  └────────────┘    │ (CRD封装层)  │    └─────┘ │
   │                    └──────────────┘            │
